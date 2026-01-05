@@ -193,7 +193,7 @@ const SocialModerationPlatform = () => {
     };
 
     attachStreamToVideo();
-  }, [isStreaming, currentStream]);
+  }, [isStreaming, currentStream, activeTab]);
 
   const handleLogin = () => {
     if (username.trim()) {
