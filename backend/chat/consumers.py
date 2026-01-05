@@ -1,4 +1,6 @@
 import json
+import time
+import traceback
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth.models import User
@@ -34,66 +36,76 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
     
     async def receive(self, text_data):
-        data = json.loads(text_data)
-        message_type = data.get('type')
-        
-        if message_type == 'chat_message':
-            username = data['username']
-            message_text = data['message']
-            user_id = data.get('user_id')
-            
-            # Check if user is restricted
-            is_restricted = await self.check_user_restriction(user_id)
-            if is_restricted:
+        try:
+            data = json.loads(text_data)
+            message_type = data.get('type')
+
+            if message_type == 'chat_message':
+                username = data['username']
+                message_text = data['message']
+                user_id = data.get('user_id')
+
+                # Check if user is restricted
+                is_restricted = await self.check_user_restriction(user_id)
+                if is_restricted:
+                    await self.send(text_data=json.dumps({
+                        'type': 'error',
+                        'message': 'You are restricted from chatting'
+                    }))
+                    return
+
+                # Check toxicity
+                detector = ToxicityDetector()
+                toxicity_result = await database_sync_to_async(detector.analyze)(message_text)
+
+                is_toxic = toxicity_result['is_toxic']
+                toxicity_score = toxicity_result['toxicity_score']
+
+                # Save message to database
+                message = await self.save_message(
+                    user_id,
+                    message_text,
+                    None,
+                    is_toxic,
+                    toxicity_score
+                )
+
+                if is_toxic:
+                    # Issue warning (use saved message's user id to avoid missing-user lookups)
+                    warning_count = await self.issue_warning(message['user_id'], message['id'])
+
+                    if warning_count >= 3:
+                        # Restrict user
+                        await self.restrict_user(message['user_id'])
+
+                        await self.send(text_data=json.dumps({
+                            'type': 'restriction',
+                            'message': 'You have been restricted from chatting due to repeated violations'
+                        }))
+                    else:
+                        await self.send(text_data=json.dumps({
+                            'type': 'warning',
+                            'warning_count': warning_count,
+                            'message': f'Warning {warning_count}/3: Your message contains inappropriate content'
+                        }))
+
+                # Broadcast message to room group
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'chat_message',
+                        'message': message
+                    }
+                )
+        except Exception:
+            traceback.print_exc()
+            try:
                 await self.send(text_data=json.dumps({
                     'type': 'error',
-                    'message': 'You are restricted from chatting'
+                    'message': 'Server error processing message'
                 }))
-                return
-            
-            # Check toxicity
-            detector = ToxicityDetector()
-            toxicity_result = await database_sync_to_async(detector.analyze)(message_text)
-            
-            is_toxic = toxicity_result['is_toxic']
-            toxicity_score = toxicity_result['toxicity_score']
-            
-            # Save message to database
-            message = await self.save_message(
-                user_id, 
-                message_text, 
-                None,
-                is_toxic,
-                toxicity_score
-            )
-            
-            if is_toxic:
-                # Issue warning
-                warning_count = await self.issue_warning(user_id, message['id'])
-                
-                if warning_count >= 3:
-                    # Restrict user
-                    await self.restrict_user(user_id)
-                    
-                    await self.send(text_data=json.dumps({
-                        'type': 'restriction',
-                        'message': 'You have been restricted from chatting due to repeated violations'
-                    }))
-                else:
-                    await self.send(text_data=json.dumps({
-                        'type': 'warning',
-                        'warning_count': warning_count,
-                        'message': f'Warning {warning_count}/3: Your message contains inappropriate content'
-                    }))
-            
-            # Broadcast message to room group
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    'type': 'chat_message',
-                    'message': message
-                }
-            )
+            except:
+                pass
     
     async def chat_message(self, event):
         """Receive message from room group"""
@@ -120,7 +132,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def save_message(self, user_id, text, stream_id, is_flagged, toxicity_score):
-        user = User.objects.get(id=user_id)
+        try:
+            user = User.objects.get(id=user_id)
+        except Exception:
+            # Create a lightweight guest user when the provided user_id doesn't exist
+            username = f'guest_{user_id or int(time.time()*1000)}'
+            user, _ = User.objects.get_or_create(username=username)
         stream = Stream.objects.get(id=stream_id) if stream_id else None
         
         message = Message.objects.create(
@@ -230,63 +247,73 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         await self.update_viewer_count(-1)
     
     async def receive(self, text_data):
-        data = json.loads(text_data)
-        message_type = data.get('type')
-        
-        if message_type == 'chat_message':
-            username = data['username']
-            message_text = data['message']
-            user_id = data.get('user_id')
-            
-            # Check if user is restricted
-            is_restricted = await self.check_user_restriction(user_id)
-            if is_restricted:
+        try:
+            data = json.loads(text_data)
+            message_type = data.get('type')
+
+            if message_type == 'chat_message':
+                username = data['username']
+                message_text = data['message']
+                user_id = data.get('user_id')
+
+                # Check if user is restricted
+                is_restricted = await self.check_user_restriction(user_id)
+                if is_restricted:
+                    await self.send(text_data=json.dumps({
+                        'type': 'error',
+                        'message': 'You are restricted from chatting'
+                    }))
+                    return
+
+                # Check toxicity
+                detector = ToxicityDetector()
+                toxicity_result = await database_sync_to_async(detector.analyze)(message_text)
+
+                is_toxic = toxicity_result['is_toxic']
+                toxicity_score = toxicity_result['toxicity_score']
+
+                # Save message to database
+                message = await self.save_message(
+                    user_id,
+                    message_text,
+                    self.stream_id,
+                    is_toxic,
+                    toxicity_score
+                )
+
+                if is_toxic:
+                    warning_count = await self.issue_warning(message['user_id'], message['id'])
+
+                    if warning_count >= 3:
+                        await self.restrict_user(message['user_id'])
+                        await self.send(text_data=json.dumps({
+                            'type': 'restriction',
+                            'message': 'You have been restricted from chatting'
+                        }))
+                    else:
+                        await self.send(text_data=json.dumps({
+                            'type': 'warning',
+                            'warning_count': warning_count,
+                            'message': f'Warning {warning_count}/3: Inappropriate content'
+                        }))
+
+                # Broadcast message
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'chat_message',
+                        'message': message
+                    }
+                )
+        except Exception:
+            traceback.print_exc()
+            try:
                 await self.send(text_data=json.dumps({
                     'type': 'error',
-                    'message': 'You are restricted from chatting'
+                    'message': 'Server error processing message'
                 }))
-                return
-            
-            # Check toxicity
-            detector = ToxicityDetector()
-            toxicity_result = await database_sync_to_async(detector.analyze)(message_text)
-            
-            is_toxic = toxicity_result['is_toxic']
-            toxicity_score = toxicity_result['toxicity_score']
-            
-            # Save message to database
-            message = await self.save_message(
-                user_id, 
-                message_text, 
-                self.stream_id,
-                is_toxic,
-                toxicity_score
-            )
-            
-            if is_toxic:
-                warning_count = await self.issue_warning(user_id, message['id'])
-                
-                if warning_count >= 3:
-                    await self.restrict_user(user_id)
-                    await self.send(text_data=json.dumps({
-                        'type': 'restriction',
-                        'message': 'You have been restricted from chatting'
-                    }))
-                else:
-                    await self.send(text_data=json.dumps({
-                        'type': 'warning',
-                        'warning_count': warning_count,
-                        'message': f'Warning {warning_count}/3: Inappropriate content'
-                    }))
-            
-            # Broadcast message
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    'type': 'chat_message',
-                    'message': message
-                }
-            )
+            except:
+                pass
     
     async def chat_message(self, event):
         message = event['message']
@@ -313,7 +340,11 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def save_message(self, user_id, text, stream_id, is_flagged, toxicity_score):
-        user = User.objects.get(id=user_id)
+        try:
+            user = User.objects.get(id=user_id)
+        except Exception:
+            username = f'guest_{user_id or int(time.time()*1000)}'
+            user, _ = User.objects.get_or_create(username=username)
         stream = Stream.objects.get(id=stream_id)
         
         message = Message.objects.create(

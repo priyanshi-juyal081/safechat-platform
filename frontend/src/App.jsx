@@ -36,17 +36,12 @@ const SocialModerationPlatform = () => {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log('WebSocket message:', data);
-        
+
         if (data.type === 'message_history') {
-          setMessages(data.messages.map(msg => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp),
-            streamId: msg.stream_id || null,
-            flagged: msg.is_flagged
-          })));
+          setMessages(prev => mergeMessages(prev, data.messages, null));
         } else if (data.type === 'new_message') {
           const msg = data.message;
-          setMessages(prev => [...prev, {
+          const serverMsg = {
             id: msg.id,
             userId: msg.user_id,
             username: msg.username,
@@ -54,7 +49,23 @@ const SocialModerationPlatform = () => {
             timestamp: new Date(msg.timestamp),
             streamId: msg.stream_id || null,
             flagged: msg.is_flagged
-          }]);
+          };
+
+          setMessages(prev => {
+            let replaced = false;
+            const next = prev.map(p => {
+              if (!replaced && String(p.id).startsWith('local-') && p.username === serverMsg.username && p.text === serverMsg.text && Math.abs(new Date(p.timestamp) - serverMsg.timestamp) < 5000) {
+                replaced = true;
+                return serverMsg;
+              }
+              return p;
+            });
+
+            if (!replaced) {
+              return [...next, serverMsg];
+            }
+            return next;
+          });
         } else if (data.type === 'warning') {
           setWarnings(prev => ({ ...prev, [user.id]: data.warning_count }));
           alert(data.message);
@@ -101,17 +112,12 @@ const SocialModerationPlatform = () => {
       
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        
+
         if (data.type === 'message_history') {
-          setMessages(data.messages.map(msg => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp),
-            streamId: msg.stream_id || currentStream.id,
-            flagged: msg.is_flagged
-          })));
+          setMessages(prev => mergeMessages(prev, data.messages, currentStream.id));
         } else if (data.type === 'new_message') {
           const msg = data.message;
-          setMessages(prev => [...prev, {
+          const serverMsg = {
             id: msg.id,
             userId: msg.user_id,
             username: msg.username,
@@ -119,7 +125,23 @@ const SocialModerationPlatform = () => {
             timestamp: new Date(msg.timestamp),
             streamId: currentStream.id,
             flagged: msg.is_flagged
-          }]);
+          };
+
+          setMessages(prev => {
+            let replaced = false;
+            const next = prev.map(p => {
+              if (!replaced && String(p.id).startsWith('local-') && p.username === serverMsg.username && p.text === serverMsg.text && Math.abs(new Date(p.timestamp) - serverMsg.timestamp) < 5000) {
+                replaced = true;
+                return serverMsg;
+              }
+              return p;
+            });
+
+            if (!replaced) {
+              return [...next, serverMsg];
+            }
+            return next;
+          });
         } else if (data.type === 'warning') {
           setWarnings(prev => ({ ...prev, [user.id]: data.warning_count }));
           alert(data.message);
@@ -155,6 +177,24 @@ const SocialModerationPlatform = () => {
     }
   }, [messages]);
 
+  // Ensure the active video element always has the current MediaStream attached.
+  useEffect(() => {
+    const attachStreamToVideo = async () => {
+      if (isStreaming && streamRef.current && videoRef.current) {
+        try {
+          if (videoRef.current.srcObject !== streamRef.current) {
+            videoRef.current.srcObject = streamRef.current;
+          }
+          await videoRef.current.play();
+        } catch (err) {
+          console.warn('Could not autoplay attached stream:', err);
+        }
+      }
+    };
+
+    attachStreamToVideo();
+  }, [isStreaming, currentStream]);
+
   const handleLogin = () => {
     if (username.trim()) {
       setUser({
@@ -173,16 +213,32 @@ const SocialModerationPlatform = () => {
       return;
     }
 
-    const ws = currentStream ? streamWsRef.current : wsRef.current;
-    
+    // Choose WebSocket and stream context based on active tab to avoid mixing chats
+    const ws = activeTab === 'chat' ? wsRef.current : streamWsRef.current;
+    const targetStreamId = activeTab === 'chat' ? null : (currentStream ? currentStream.id : null);
+
     if (ws && ws.readyState === WebSocket.OPEN) {
+      const msgText = messageInput.trim();
+
       ws.send(JSON.stringify({
         type: 'chat_message',
         username: user.username,
         user_id: user.id,
-        message: messageInput.trim()
+        message: msgText
       }));
-      
+
+      const localMsg = {
+        id: `local-${Date.now()}`,
+        userId: user.id,
+        username: user.username,
+        text: msgText,
+        timestamp: new Date(),
+        streamId: targetStreamId,
+        flagged: false
+      };
+
+      setMessages(prev => [...prev, localMsg]);
+
       setMessageInput('');
     } else {
       alert('Not connected to chat server. Please wait...');
@@ -202,7 +258,13 @@ const SocialModerationPlatform = () => {
       });
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        try {
+          videoRef.current.srcObject = stream;
+          // Some browsers require an explicit play() call even with autoplay/muted
+          await videoRef.current.play();
+        } catch (err) {
+          console.warn('Could not autoplay video element:', err);
+        }
       }
 
       streamRef.current = stream;
@@ -227,6 +289,40 @@ const SocialModerationPlatform = () => {
     }
   };
 
+  // Merge server history with local messages for a specific chat context (global or a stream)
+  // targetStreamId: null for global chat, or a stream id for stream chat
+  const mergeMessages = (prevMessages, serverMessages, targetStreamId = null) => {
+    const incoming = serverMessages.map(msg => ({
+      id: msg.id,
+      userId: msg.user_id,
+      username: msg.username,
+      text: msg.text,
+      timestamp: new Date(msg.timestamp),
+      streamId: msg.stream_id === undefined ? null : msg.stream_id,
+      flagged: msg.is_flagged
+    })).filter(m => m.streamId === targetStreamId);
+
+    const incomingIds = new Set(incoming.map(m => m.id));
+
+    const keptLocal = prevMessages.filter(pm => {
+      // Always keep messages for other streams
+      if (pm.streamId !== targetStreamId) return true;
+
+      // For local optimistic messages in this stream, remove if server confirmed
+      if (String(pm.id).startsWith('local-')) {
+        const match = incoming.find(im => im.username === pm.username && im.text === pm.text && Math.abs(im.timestamp - new Date(pm.timestamp)) < 5000);
+        return !match;
+      }
+
+      // For server-sourced prev messages in this stream, keep only if not present in incoming (avoid duplicates)
+      return !incomingIds.has(pm.id);
+    });
+
+    const merged = [...prevMessages.filter(pm => pm.streamId !== targetStreamId), ...incoming, ...keptLocal.filter(pm => pm.streamId === targetStreamId)];
+    merged.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    return merged;
+  };
+
   const handleStopStream = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -242,6 +338,11 @@ const SocialModerationPlatform = () => {
     setIsStreaming(false);
     setCurrentStream(null);
     setStreamTitle('');
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+      } catch (e) {}
+    }
   };
 
   const handleJoinStream = (stream) => {
@@ -279,9 +380,15 @@ const SocialModerationPlatform = () => {
   };
 
   const getFilteredMessages = () => {
-    if (currentStream) {
+    if (activeTab === 'chat') {
+      return messages.filter(msg => msg.streamId === null);
+    }
+
+    if (activeTab === 'live' && currentStream) {
       return messages.filter(msg => msg.streamId === currentStream.id);
     }
+
+    // default to global chat messages
     return messages.filter(msg => msg.streamId === null);
   };
 
