@@ -1,46 +1,28 @@
-"""
-AI Toxicity Detection Module
-FILE: backend/moderation/ai_detector.py
-
-This module provides toxicity detection using multiple approaches:
-1. Keyword-based detection (fast, simple)
-2. Transformer-based model (accurate, requires GPU/CPU)
-3. External API integration (optional)
-"""
-
 import re
+import os
+import time
 from typing import Dict, List
+
+# -------------------------------
+# Main Detector
+# -------------------------------
 
 class ToxicityDetector:
     """Main toxicity detection class"""
-    
-    def __init__(self, method='keyword'):
+
+    def __init__(self, method='api'):
         """
-        Initialize detector with specified method
-        
-        Args:
-            method: 'keyword', 'transformer', or 'api'
+        method: 'keyword', 'transformer', or 'api'
         """
         self.method = method
         self.keyword_detector = KeywordDetector()
-        
+
         if method == 'transformer':
             self.model_detector = TransformerDetector()
         elif method == 'api':
             self.api_detector = APIDetector()
-    
+
     def analyze(self, text: str) -> Dict:
-        """
-        Analyze text for toxicity
-        
-        Returns:
-            {
-                'is_toxic': bool,
-                'toxicity_score': float (0-1),
-                'categories': dict,
-                'detected_words': list
-            }
-        """
         if self.method == 'keyword':
             return self.keyword_detector.detect(text)
         elif self.method == 'transformer':
@@ -51,296 +33,243 @@ class ToxicityDetector:
             return self.keyword_detector.detect(text)
 
 
+# -------------------------------
+# Keyword Fallback Detector
+# -------------------------------
+
 class KeywordDetector:
     """Fast keyword-based toxicity detection"""
-    
+
     def __init__(self):
-        # Toxic keywords categorized by severity
         self.toxic_keywords = {
             'high': [
-                'hate','fuck you','go die' 'kill', 'die', 'death', 'nazi', 'terrorist',
+                'hate', 'kill', 'die', 'death', 'nazi', 'terrorist',
                 'rape', 'murder', 'violence', 'abuse', 'attack'
             ],
             'medium': [
                 'stupid', 'idiot', 'dumb', 'moron', 'loser', 'pathetic',
-                'trash', 'garbage', 'worthless', 'useless', 'disgusting'
+                'trash', 'garbage', 'worthless', 'useless', 'disgusting',
+                'fuck', 'shit', 'bitch', 'asshole', 'fucking'
             ],
             'low': [
-                'shut up', 'shut', 'annoying', 'boring', 'lame', 'weak',
+                'shut up', 'annoying', 'boring', 'lame',
                 'bad', 'terrible', 'awful', 'horrible'
             ]
         }
-        
-        # Harassment patterns
+
         self.harassment_patterns = [
-            r'kys',  # kill yourself
+            r'\bkys\b',
             r'go die',
-            r'f+u+c*k+ *y+o+u+',
-            r'you+ *suck',
-            r'kill+ *yourself',
+            r'\bfuck(?:ing)?\b',
+            r'you\s+suck',
+            r'kill(?:\s+yourself)?',
         ]
-    
+
     def detect(self, text: str) -> Dict:
-        """Detect toxicity using keywords"""
         text_lower = text.lower()
-        
         detected_words = []
         severity_scores = {'high': 0, 'medium': 0, 'low': 0}
-        
-        # Check keywords
+
+        # Helper: allow non-word separators between characters to match obfuscated words
+        def make_fuzzy_pattern(word: str) -> str:
+            # e.g. 'fuck' -> r'\bf\W*u\W*c\W*k\b'
+            chars = [re.escape(c) for c in word]
+            return r"\b" + r"\W*".join(chars) + r"\b"
+
         for severity, keywords in self.toxic_keywords.items():
             for keyword in keywords:
-                if keyword in text_lower:
+                pattern = make_fuzzy_pattern(keyword)
+                if keyword in text_lower or re.search(pattern, text_lower):
                     detected_words.append(keyword)
                     severity_scores[severity] += 1
-        
-        # Check harassment patterns
+
         for pattern in self.harassment_patterns:
             if re.search(pattern, text_lower):
                 detected_words.append('harassment_pattern')
                 severity_scores['high'] += 1
-        
-        # Calculate overall toxicity score
+
         toxicity_score = (
             severity_scores['high'] * 1.0 +
             severity_scores['medium'] * 0.6 +
             severity_scores['low'] * 0.3
         )
-        
-        # Normalize to 0-1 range
         toxicity_score = min(toxicity_score / 3.0, 1.0)
-        
         is_toxic = toxicity_score > 0.3
-        
+
         return {
             'is_toxic': is_toxic,
             'toxicity_score': toxicity_score,
-            'categories': {
-                'toxicity': toxicity_score,
-                'severe_toxicity': severity_scores['high'] > 0,
-                'obscene': False,
-                'threat': severity_scores['high'] > 0,
-                'insult': severity_scores['medium'] > 0,
-                'identity_attack': False,
-            },
+            'categories': severity_scores,
             'detected_words': detected_words,
             'method': 'keyword'
         }
 
 
+# -------------------------------
+# Transformer Detector (Optional)
+# -------------------------------
+
 class TransformerDetector:
-    """
-    Advanced transformer-based toxicity detection
-    Uses pre-trained models for more accurate detection
-    """
-    
     def __init__(self):
         try:
             from transformers import pipeline
-            # Load a toxicity detection model
-            # Options:
-            # - "unitary/toxic-bert"
-            # - "martin-ha/toxic-comment-model"
-            # - "facebook/roberta-hate-speech-dynabench-r4-target"
-            
             self.classifier = pipeline(
                 "text-classification",
                 model="unitary/toxic-bert",
                 top_k=None
             )
         except Exception as e:
-            print(f"Error loading transformer model: {e}")
-            print("Falling back to keyword detection")
+            print("Transformer load failed:", e)
             self.classifier = None
-    
+
     def detect(self, text: str) -> Dict:
-        """Detect toxicity using transformer model"""
         if not self.classifier:
-            # Fallback to keyword detection
             return KeywordDetector().detect(text)
-        
+
         try:
             results = self.classifier(text)[0]
-            
-            # Parse results
-            toxicity_scores = {}
-            for result in results:
-                label = result['label'].lower()
-                score = result['score']
-                toxicity_scores[label] = score
-            
-            # Get overall toxicity score
-            toxicity_score = toxicity_scores.get('toxic', 0.0)
-            is_toxic = toxicity_score > 0.5
-            
-            return {
-                'is_toxic': is_toxic,
-                'toxicity_score': toxicity_score,
-                'categories': toxicity_scores,
-                'detected_words': [],
-                'method': 'transformer'
-            }
-        except Exception as e:
-            print(f"Error in transformer detection: {e}")
-            return KeywordDetector().detect(text)
+            scores = {r['label'].lower(): r['score'] for r in results}
+            toxicity_score = scores.get('toxic', 0.0)
 
-
-class APIDetector:
-    """
-    Use external API for toxicity detection
-    Example: Google Perspective API, OpenAI Moderation API
-    """
-    
-    def __init__(self):
-        self.api_key = None  # Set your API key here
-        # You can use environment variables:
-        # import os
-        # self.api_key = os.getenv('PERSPECTIVE_API_KEY')
-    
-    def detect(self, text: str) -> Dict:
-        """Detect toxicity using external API"""
-        
-        # Example: Google Perspective API
-        if self.api_key:
-            return self._perspective_api(text)
-        
-        # Fallback to keyword detection
-        return KeywordDetector().detect(text)
-    
-    def _perspective_api(self, text: str) -> Dict:
-        """
-        Use Google Perspective API for toxicity detection
-        Documentation: https://developers.perspectiveapi.com/
-        """
-        import requests
-        
-        url = f"https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key={self.api_key}"
-        
-        data = {
-            'comment': {'text': text},
-            'languages': ['en'],
-            'requestedAttributes': {
-                'TOXICITY': {},
-                'SEVERE_TOXICITY': {},
-                'IDENTITY_ATTACK': {},
-                'INSULT': {},
-                'PROFANITY': {},
-                'THREAT': {}
-            }
-        }
-        
-        try:
-            response = requests.post(url, json=data)
-            result = response.json()
-            
-            scores = {}
-            for attr, data in result['attributeScores'].items():
-                scores[attr.lower()] = data['summaryScore']['value']
-            
-            toxicity_score = scores.get('toxicity', 0.0)
-            is_toxic = toxicity_score > 0.7
-            
             return {
-                'is_toxic': is_toxic,
+                'is_toxic': toxicity_score > 0.5,
                 'toxicity_score': toxicity_score,
                 'categories': scores,
                 'detected_words': [],
-                'method': 'perspective_api'
+                'method': 'transformer'
             }
-        except Exception as e:
-            print(f"Perspective API error: {e}")
+        except Exception:
             return KeywordDetector().detect(text)
-    
+
+
+# -------------------------------
+# API Detector (OPENAI)
+# -------------------------------
+
+class APIDetector:
+    """
+    Uses OpenAI Moderation API
+    """
+
+    def __init__(self):
+        self.api_key = os.getenv("OPENAI_API_KEY")
+
+    def detect(self, text: str) -> Dict:
+        if not self.api_key:
+            print("OPENAI_API_KEY not set, falling back to keywords")
+            return KeywordDetector().detect(text)
+
+        return self._openai_moderation(text)
+
     def _openai_moderation(self, text: str) -> Dict:
-        """
-        Use OpenAI Moderation API
-        Documentation: https://platform.openai.com/docs/guides/moderation
-        """
-        import openai
-        
-        try:
-            response = openai.Moderation.create(input=text)
-            result = response['results'][0]
-            
-            categories = result['categories']
-            category_scores = result['category_scores']
-            
-            # Get highest score
-            toxicity_score = max(category_scores.values())
-            is_toxic = result['flagged']
-            
-            return {
-                'is_toxic': is_toxic,
-                'toxicity_score': toxicity_score,
-                'categories': category_scores,
-                'detected_words': [],
-                'method': 'openai_moderation'
-            }
-        except Exception as e:
-            print(f"OpenAI Moderation error: {e}")
-            return KeywordDetector().detect(text)
+        max_attempts = 3
+        backoff = 1
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=self.api_key)
+
+                response = client.moderations.create(
+                    model="omni-moderation-latest",
+                    input=text
+                )
+
+                result = response.results[0]
+                scores = result.category_scores
+                toxicity_score = max(scores.values()) if scores else 0.0
+
+                # If OpenAI flags the content, return that result
+                if result.flagged:
+                    return {
+                        'is_toxic': True,
+                        'toxicity_score': toxicity_score,
+                        'categories': scores,
+                        'detected_words': [],
+                        'method': 'openai_moderation'
+                    }
+
+                # Fallback: if OpenAI did not flag, still run keyword detector as a safety net
+                keyword_result = KeywordDetector().detect(text)
+                if keyword_result.get('is_toxic'):
+                    merged = keyword_result.copy()
+                    merged.update({
+                        'method': 'openai_moderation+keyword',
+                        'categories': {**(scores or {}), **keyword_result.get('categories', {})}
+                    })
+                    return merged
+
+                # Neither OpenAI nor keyword detected toxicity
+                return {
+                    'is_toxic': False,
+                    'toxicity_score': toxicity_score,
+                    'categories': scores,
+                    'detected_words': [],
+                    'method': 'openai_moderation'
+                }
+
+            except Exception as e:
+                msg = str(e)
+                print("OpenAI moderation error:", e)
+
+                # If rate limited, retry with exponential backoff
+                if attempt < max_attempts and ("too many requests" in msg.lower() or "429" in msg):
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+
+                # On final failure or non-retriable error, fall back to keyword detector
+                return KeywordDetector().detect(text)
 
 
-# Utility functions for advanced detection
+# -------------------------------
+# Extra Quality Checks
+# -------------------------------
+
 def detect_spam(text: str) -> bool:
-    """Detect spam patterns"""
-    spam_indicators = [
-        len(text) > 500,  # Very long messages
-        text.count('http') > 3,  # Multiple links
-        len(set(text.lower().split())) / len(text.split()) < 0.3,  # Low word diversity
-    ]
-    return sum(spam_indicators) >= 2
+    return (
+        len(text) > 500 or
+        text.count('http') > 3
+    )
 
 
 def detect_repeated_characters(text: str) -> bool:
-    """Detect excessive repeated characters (like 'aaaaaaa')"""
-    pattern = r'(.)\1{5,}'
-    return bool(re.search(pattern, text))
+    return bool(re.search(r'(.)\1{5,}', text))
 
 
 def detect_all_caps(text: str) -> bool:
-    """Detect messages in ALL CAPS (shouting)"""
-    if len(text) < 10:
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 5:
         return False
-    alpha_chars = [c for c in text if c.isalpha()]
-    if not alpha_chars:
-        return False
-    caps_ratio = sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars)
-    return caps_ratio > 0.7
+    return sum(c.isupper() for c in letters) / len(letters) > 0.7
 
 
 def comprehensive_check(text: str) -> Dict:
-    """Perform comprehensive toxicity and quality checks"""
-    detector = ToxicityDetector(method='keyword')
-    toxicity_result = detector.analyze(text)
-    
+    detector = ToxicityDetector(method='api')
+    result = detector.analyze(text)
+
     return {
-        **toxicity_result,
+        **result,
         'is_spam': detect_spam(text),
         'has_repeated_chars': detect_repeated_characters(text),
         'is_shouting': detect_all_caps(text),
     }
 
 
-# Example usage
+# -------------------------------
+# Test
+# -------------------------------
+
 if __name__ == '__main__':
-    detector = ToxicityDetector(method='keyword')
-    
-    test_messages = [
-        "Hello everyone! How are you?",
-        "You are so stupid and worthless",
-        "I hate this person, they should die",
-        "This is amazing! Great work!",
-        "STOP SPAMMING YOU IDIOT"
+    detector = ToxicityDetector(method='api')
+
+    tests = [
+        "Hello everyone!",
+        "you are a f***ing idiot",
+        "go kill yourself",
+        "THIS IS SO ANNOYING"
     ]
-    
-    print("Toxicity Detection Results:")
-    print("=" * 50)
-    
-    for msg in test_messages:
-        result = detector.analyze(msg)
-        print(f"\nMessage: {msg}")
-        print(f"Toxic: {result['is_toxic']}")
-        print(f"Score: {result['toxicity_score']:.2f}")
-        print(f"Detected: {result['detected_words']}")
-        print("-" * 50)
+
+    for t in tests:
+        print("\nText:", t)
+        print(detector.analyze(t))

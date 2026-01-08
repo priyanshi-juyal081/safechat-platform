@@ -3,9 +3,25 @@ import time
 import traceback
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from .models import Message, Stream
 from moderation.ai_detector import ToxicityDetector
+from asgiref.sync import sync_to_async
+
+
+@database_sync_to_async
+def get_or_create_user_db(username, client_user_id=None):
+    User = get_user_model()
+    try:
+        if client_user_id:
+            u = User.objects.filter(id=client_user_id).first()
+            if u:
+                return u.id
+    except Exception:
+        pass
+
+    user, _ = User.objects.get_or_create(username=username)
+    return user.id
 
 class ChatConsumer(AsyncWebsocketConsumer):
     """Global chat WebSocket consumer"""
@@ -46,7 +62,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 client_user_id = data.get('user_id')
 
                 # Resolve or create a server-side user for this client (ensures restriction checks work)
-                server_user_id = await self.get_or_create_user(username, client_user_id)
+                server_user_id = await get_or_create_user_db(username, client_user_id)
 
                 # Check if user is restricted (using server-side id)
                 is_restricted = await self.check_user_restriction(server_user_id)
@@ -133,10 +149,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def save_message(self, user_id, text, stream_id, is_flagged, toxicity_score):
         try:
+            User = get_user_model()
             user = User.objects.get(id=user_id)
         except Exception:
             # Create a lightweight guest user when the provided user_id doesn't exist
             username = f'guest_{user_id or int(time.time()*1000)}'
+            User = get_user_model()
             user, _ = User.objects.get_or_create(username=username)
         stream = Stream.objects.get(id=stream_id) if stream_id else None
         
@@ -181,49 +199,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except:
             return False
 
-    @database_sync_to_async
-    def get_or_create_user(self, username, client_user_id=None):
-        try:
-            if client_user_id:
-                u = User.objects.filter(id=client_user_id).first()
-                if u:
-                    return u.id
-        except:
-            pass
-
-        user, _ = User.objects.get_or_create(username=username)
-        return user.id
-
-    @database_sync_to_async
-    def get_or_create_user(self, username, client_user_id=None):
-        try:
-            if client_user_id:
-                u = User.objects.filter(id=client_user_id).first()
-                if u:
-                    return u.id
-        except:
-            pass
-
-        user, _ = User.objects.get_or_create(username=username)
-        return user.id
-
-    @database_sync_to_async
-    def get_or_create_user(self, username, client_user_id=None):
-        try:
-            if client_user_id:
-                u = User.objects.filter(id=client_user_id).first()
-                if u:
-                    return u.id
-        except:
-            pass
-
-        # Fallback: find or create by username
-        user, _ = User.objects.get_or_create(username=username)
-        return user.id
+    
     
     @database_sync_to_async
     def issue_warning(self, user_id, message_id):
         from moderation.models import Warning
+        User = get_user_model()
         user = User.objects.get(id=user_id)
         message = Message.objects.get(id=message_id) if message_id else None
 
@@ -239,7 +220,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def restrict_user(self, user_id):
         from moderation.models import Restriction
-        
+        User = get_user_model()
         user = User.objects.get(id=user_id)
         
         Restriction.objects.create(
@@ -296,7 +277,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 client_user_id = data.get('user_id')
 
                 # Resolve or create a server-side user for this client (ensures restriction checks work)
-                server_user_id = await self.get_or_create_user(username, client_user_id)
+                server_user_id = await get_or_create_user_db(username, client_user_id)
 
                 # Check if user is restricted (using server-side id)
                 is_restricted = await self.check_user_restriction(server_user_id)
@@ -383,9 +364,11 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def save_message(self, user_id, text, stream_id, is_flagged, toxicity_score):
         try:
+            User = get_user_model()
             user = User.objects.get(id=user_id)
         except Exception:
             username = f'guest_{user_id or int(time.time()*1000)}'
+            User = get_user_model()
             user, _ = User.objects.get_or_create(username=username)
         stream = Stream.objects.get(id=stream_id)
         
@@ -439,33 +422,7 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         except:
             return False
     
-    @database_sync_to_async
-    def issue_warning(self, user_id, message_id):
-        from moderation.models import Warning
-        user = User.objects.get(id=user_id)
-        message = Message.objects.get(id=message_id) if message_id else None
-
-        Warning.objects.create(
-            user=user,
-            message=message,
-            reason="Automatic: Toxic content detected",
-            is_automatic=True
-        )
-
-        return Warning.objects.filter(user=user).count()
     
-    @database_sync_to_async
-    def restrict_user(self, user_id):
-        from moderation.models import Restriction
-        
-        user = User.objects.get(id=user_id)
-        
-        Restriction.objects.create(
-            user=user,
-            restriction_type='chat',
-            reason="Automatic: 3 warnings for toxic behavior",
-            is_permanent=False
-        )
 
 
 class StreamConsumer(AsyncWebsocketConsumer):
