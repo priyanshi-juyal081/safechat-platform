@@ -69,8 +69,13 @@ class ToxicityLog(models.Model):
 
 class SpeechViolation(models.Model):
     """Track speech violations during live streams"""
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='speech_violations')
-    stream = models.ForeignKey('chat.Stream', on_delete=models.CASCADE, related_name='speech_violations')
+    # Allow nullable user for ephemeral / unauthenticated clients
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='speech_violations')
+    # Store a raw identifier when no DB `User` exists (e.g. frontend ephemeral id)
+    user_identifier = models.CharField(max_length=255, null=True, blank=True)
+    # Allow nullable stream (frontend may not create Stream rows) and store raw identifier
+    stream = models.ForeignKey('chat.Stream', on_delete=models.SET_NULL, null=True, blank=True, related_name='speech_violations')
+    stream_identifier = models.CharField(max_length=255, null=True, blank=True)
     transcript = models.TextField()
     toxicity_score = models.FloatField()
     detected_words = models.JSONField(default=list)
@@ -89,13 +94,20 @@ class SpeechViolation(models.Model):
         ]
     
     def __str__(self):
-        return f"Speech violation by {self.user.username} in {self.stream.title}"
+        user_display = self.user.username if self.user else (self.user_identifier or 'unknown')
+        stream_display = self.stream.title if self.stream else (self.stream_identifier or 'unknown')
+        return f"Speech violation by {user_display} in {stream_display}"
 
 
 class StreamTimeout(models.Model):
     """Track stream timeouts for users"""
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='stream_timeouts')
-    stream = models.ForeignKey('chat.Stream', on_delete=models.CASCADE, related_name='timeouts')
+    # Allow nullable user for ephemeral / unauthenticated clients
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='stream_timeouts')
+    # Raw identifier when no DB `User` exists
+    user_identifier = models.CharField(max_length=255, null=True, blank=True)
+    # Allow nullable stream and raw identifier
+    stream = models.ForeignKey('chat.Stream', on_delete=models.SET_NULL, null=True, blank=True, related_name='timeouts')
+    stream_identifier = models.CharField(max_length=255, null=True, blank=True)
     duration_seconds = models.IntegerField(default=60)  # Default 1 minute timeout
     reason = models.TextField()
     started_at = models.DateTimeField(auto_now_add=True)
@@ -109,4 +121,6 @@ class StreamTimeout(models.Model):
         ]
     
     def __str__(self):
-        return f"Timeout for {self.user.username} in {self.stream.title}"
+        user_display = self.user.username if self.user else (self.user_identifier or 'unknown')
+        stream_display = self.stream.title if self.stream else (self.stream_identifier or 'unknown')
+        return f"Timeout for {user_display} in {stream_display}"
