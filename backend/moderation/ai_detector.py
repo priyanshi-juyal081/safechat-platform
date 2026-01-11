@@ -309,12 +309,15 @@ def is_factually_correct(text: str) -> Tuple[bool, str]:
             "key": api_key
         }
         
-        print(f"🔍 Checking facts for: '{text[:50]}...'")
+        print(f"🔍 Checking facts for: '{text}' using Google Fact Check API")
         response = requests.get(url, params=params)
+        print(f"📡 API Response Status: {response.status_code}")
         response.raise_for_status()
         data = response.json()
+        print(f"📊 API Data Keys: {list(data.keys())}")
 
         claims = data.get('claims', [])
+        print(f"🔎 Claims found: {len(claims)}")
         if not claims:
             return True, ""
 

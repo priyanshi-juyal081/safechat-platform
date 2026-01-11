@@ -12,6 +12,65 @@ import {
   reportPost,
   deletePost
 } from "./firebase";
+import './App.css';
+
+const ChatMessage = ({ msg, isCurrentUser, onWarn, onRestrict }) => {
+  const bubbleColor = isCurrentUser
+    ? 'glass-effect-light text-white ml-auto'
+    : 'glass-effect text-purple-100 mr-auto';
+  const tailClass = isCurrentUser ? 'bubble-tail-right' : 'bubble-tail-left';
+  const pronouns = "HE/HIM"; // Static for aesthetic match
+
+  return (
+    <div className={`flex items-end space-x-3 mb-6 animate-fade-in ${isCurrentUser ? 'flex-row-reverse space-x-reverse' : 'flex-row'}`}>
+      <div className={`flex-shrink-0 w-12 h-12 rounded-full overflow-hidden avatar-glow bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white font-bold text-lg`}>
+        {msg.username.charAt(0).toUpperCase()}
+      </div>
+
+      <div className="flex flex-col max-w-[80%]">
+        <div className={`flex items-center space-x-2 mb-1 px-2 ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+          <span className="text-xs font-bold text-purple-200 tracking-wider uppercase">{msg.username}</span>
+          <span className="text-[10px] text-purple-400 bg-purple-900/40 px-1.5 py-0.5 rounded border border-purple-500/30 font-medium tracking-tight">
+            {pronouns}
+          </span>
+          {msg.flagged && (
+            <span className="flex items-center text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 px-2 py-0.5 rounded-full">
+              <AlertTriangle className="w-3 h-3 mr-1" />
+              FLAGGED
+            </span>
+          )}
+        </div>
+
+        <div className={`message-bubble ${bubbleColor} ${tailClass}`}>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+          <div className="flex items-center justify-between mt-2 pt-1 border-t border-white/5">
+            <span className="text-[10px] opacity-40">
+              {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            {!isCurrentUser && !msg.flagged && (
+              <div className="flex space-x-1 ml-4 self-end">
+                <button
+                  onClick={() => onWarn(msg.id, msg.userId)}
+                  className="p-1 hover:bg-white/10 rounded transition-colors"
+                  title="Warn user"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-yellow-500" />
+                </button>
+                <button
+                  onClick={() => onRestrict(msg.userId)}
+                  className="p-1 hover:bg-white/10 rounded transition-colors"
+                  title="Restrict user"
+                >
+                  <Ban className="w-3.5 h-3.5 text-red-500" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const SocialModerationPlatform = () => {
   const [user, setUser] = useState(null);
@@ -591,14 +650,14 @@ const SocialModerationPlatform = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-white shadow-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div className="global-bg-gradient min-h-screen">
+      <header className="header-glass sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <Users className="w-6 h-6 text-purple-600" />
+            <div className="p-2 bg-purple-500/20 rounded-xl border border-purple-500/30">
+              <Users className="w-6 h-6 text-purple-400" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-800">SafeChat</h1>
+            <h1 className="text-2xl font-black text-white tracking-tighter">SafeChat</h1>
             <div className="flex items-center space-x-1">
               {wsConnected ? (
                 <div className="flex items-center space-x-1 text-green-600 text-xs">
@@ -608,97 +667,97 @@ const SocialModerationPlatform = () => {
               ) : (
                 <div className="flex items-center space-x-1 text-red-600 text-xs">
                   <WifiOff className="w-4 h-4" />
-                  <span>Connecting...</span>
+                  <span>Live Streams</span>
                 </div>
               )}
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <span className="text-sm text-gray-600">
-              Welcome, <span className="font-semibold">{user.username}</span>
+          <div className="flex items-center space-x-6">
+            <span className="text-sm text-purple-100/60 font-medium">
+              Welcome, <span className="text-white font-bold">{user.username}</span>
             </span>
             {/* UI Indicators for Speech Monitoring */}
             <div className="flex items-center space-x-4">
               {/* 1. Speech Monitoring Active: Green mic icon with pulse animation */}
               {isListening && !isTimedOut && !streamStopped && (
-                <div className="flex items-center space-x-1 text-green-600 bg-green-50 px-3 py-1 rounded-full animate-pulse border border-green-200">
+                <div className="flex items-center space-x-2 text-green-400 bg-green-500/10 px-3 py-1.5 rounded-full animate-pulse border border-green-500/20">
                   <Mic className="w-4 h-4" />
-                  <span className="text-sm font-medium">Monitoring Active</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">Listening</span>
                 </div>
               )}
 
               {/* 2. Timeout: Red mic-off icon with countdown timer */}
               {isTimedOut && (
-                <div className="flex items-center space-x-1 text-red-600 bg-red-50 px-3 py-1 rounded-full border border-red-200 shadow-sm">
+                <div className="flex items-center space-x-2 text-red-400 bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20 shadow-lg">
                   <MicOff className="w-4 h-4" />
-                  <span className="text-sm font-medium">MUTED: {timeoutRemaining}s</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">MUTED: {timeoutRemaining}s</span>
                 </div>
               )}
 
               {/* 3. Warnings: Yellow warning badge showing "1/3", "2/3", "3/3" */}
               {speechWarningCount > 0 && !streamStopped && (
-                <div className="flex items-center space-x-1 text-yellow-600 bg-yellow-50 px-3 py-1 rounded-full border border-yellow-200">
+                <div className="flex items-center space-x-2 text-yellow-400 bg-yellow-500/10 px-3 py-1.5 rounded-full border border-yellow-500/20">
                   <AlertTriangle className="w-4 h-4" />
-                  <span className="text-sm font-medium">Speech: {speechWarningCount}/3</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">Speech: {speechWarningCount}/3</span>
                 </div>
               )}
             </div>
 
             {warnings[user.id] > 0 && (
-              <div className="flex items-center space-x-1 text-yellow-600 bg-yellow-50 px-3 py-1 rounded-full">
+              <div className="flex items-center space-x-2 text-orange-400 bg-orange-500/10 px-3 py-1.5 rounded-full border border-orange-500/20">
                 <AlertTriangle className="w-4 h-4" />
-                <span className="text-sm font-medium">{warnings[user.id]}/3 Warnings</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-orange-400">{warnings[user.id]}/3 Warnings</span>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto p-4 flex gap-4">
-        <div className="w-64 space-y-4">
-          <div className="bg-white rounded-lg shadow-md p-4">
-            <h3 className="font-semibold text-gray-800 mb-3">Navigation</h3>
-            <div className="space-y-2">
+      <div className="max-w-7xl mx-auto p-6 flex gap-6 relative z-10">
+        <div className="w-64 space-y-6">
+          <div className="card-glass rounded-2xl p-4 overflow-hidden">
+            <h3 className="text-xs font-black text-purple-300 uppercase tracking-[0.2em] mb-4 px-3 opacity-60">Engine</h3>
+            <div className="space-y-1">
               <button
                 onClick={() => setActiveTab('chat')}
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg transition ${activeTab === 'chat' ? 'bg-purple-100 text-purple-700' : 'hover:bg-gray-100'
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 ${activeTab === 'chat' ? 'nav-item-active' : 'text-purple-100/50 hover:text-white nav-item-hover'
                   }`}
               >
-                <MessageSquare className="w-4 h-4" />
-                <span>Global Chat</span>
+                <MessageSquare className="w-5 h-5" />
+                <span className="font-bold text-sm">Global Chat</span>
               </button>
               <button
                 onClick={() => setActiveTab('streams')}
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg transition ${activeTab === 'streams' ? 'bg-purple-100 text-purple-700' : 'hover:bg-gray-100'
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 ${activeTab === 'streams' ? 'nav-item-active' : 'text-purple-100/50 hover:text-white nav-item-hover'
                   }`}
               >
-                <Video className="w-4 h-4" />
-                <span>Live Streams</span>
+                <Video className="w-5 h-5" />
+                <span className="font-bold text-sm">Live Streams</span>
               </button>
               <button
                 onClick={() => setActiveTab('golive')}
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg transition ${activeTab === 'golive' ? 'bg-purple-100 text-purple-700' : 'hover:bg-gray-100'
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 ${activeTab === 'golive' ? 'nav-item-active' : 'text-purple-100/50 hover:text-white nav-item-hover'
                   }`}
               >
-                <Radio className="w-4 h-4" />
-                <span>Go Live</span>
+                <Radio className="w-5 h-5" />
+                <span className="font-bold text-sm">Go Live</span>
               </button>
               <button
                 onClick={() => setActiveTab('posts')}
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-lg transition ${activeTab === 'posts' ? 'bg-purple-100 text-purple-700' : 'hover:bg-gray-100'
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 ${activeTab === 'posts' ? 'nav-item-active' : 'text-purple-100/50 hover:text-white nav-item-hover'
                   }`}
               >
-                <Heart className="w-4 h-4" />
-                <span>Posts</span>
+                <Heart className="w-5 h-5" />
+                <span className="font-bold text-sm">Posts</span>
               </button>
             </div>
           </div>
 
           {liveStreams.filter(s => s.isLive).length > 0 && (
-            <div className="bg-white rounded-lg shadow-md p-4">
-              <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
-                <span className="w-2 h-2 bg-red-500 rounded-full mr-2 animate-pulse"></span>
+            <div className="card-glass rounded-2xl p-4">
+              <h3 className="text-xs font-black text-red-400 uppercase tracking-[0.2em] mb-4 px-3 flex items-center">
+                <span className="w-1.5 h-1.5 bg-red-500 rounded-full mr-2 animate-pulse"></span>
                 Live Now
               </h3>
               <div className="space-y-2">
@@ -706,14 +765,14 @@ const SocialModerationPlatform = () => {
                   <button
                     key={stream.id}
                     onClick={() => handleJoinStream(stream)}
-                    className="w-full text-left p-2 hover:bg-gray-50 rounded-lg transition"
+                    className="w-full text-left p-3 hover:bg-white/5 rounded-xl transition-all group"
                   >
-                    <div className="text-sm font-medium text-gray-800 truncate">
+                    <div className="text-sm font-bold text-white group-hover:text-purple-300 truncate">
                       {stream.title}
                     </div>
-                    <div className="text-xs text-gray-500 flex items-center justify-between mt-1">
+                    <div className="text-[10px] text-purple-200/40 flex items-center justify-between mt-1 font-bold uppercase tracking-widest">
                       <span>{stream.streamerName}</span>
-                      <span className="flex items-center">
+                      <span className="flex items-center text-purple-300/60">
                         <Eye className="w-3 h-3 mr-1" />
                         {stream.viewers}
                       </span>
@@ -727,83 +786,63 @@ const SocialModerationPlatform = () => {
 
         <div className="flex-1">
           {activeTab === 'chat' && (
-            <div className="bg-white rounded-lg shadow-md h-[calc(100vh-150px)] flex flex-col">
-              <div className="p-4 border-b">
-                <h2 className="text-xl font-bold text-gray-800">Global Chat</h2>
-                <p className="text-sm text-gray-600">Real-time chat with AI moderation</p>
+            <div className="chat-bg-gradient rounded-xl shadow-2xl h-[calc(100vh-150px)] flex flex-col border border-white/10 overflow-hidden">
+              <div className="p-4 border-b border-white/10 glass-effect-light">
+                <h2 className="text-xl font-bold text-white flex items-center space-x-2">
+                  <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                  <span>Global Chat</span>
+                </h2>
+                <p className="text-sm text-purple-200/60">Encrypted and moderated real-time communication</p>
               </div>
 
-              <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-2 scrollbar-hide">
                 {getFilteredMessages().map(msg => (
-                  <div key={msg.id} className={`p-3 rounded-lg ${msg.flagged ? 'bg-red-50 border border-red-200' : 'bg-gray-50'}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-semibold text-gray-800">{msg.username}</span>
-                          <span className="text-xs text-gray-500">
-                            {msg.timestamp.toLocaleTimeString()}
-                          </span>
-                          {msg.flagged && (
-                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                              Flagged
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-gray-700 mt-1">{msg.text}</p>
-                      </div>
-                      {msg.userId !== user.id && !msg.flagged && (
-                        <div className="flex space-x-1 ml-2">
-                          <button
-                            onClick={() => handleModeratorWarn(msg.id, msg.userId)}
-                            className="p-1 hover:bg-yellow-100 rounded"
-                            title="Warn user"
-                          >
-                            <AlertTriangle className="w-4 h-4 text-yellow-600" />
-                          </button>
-                          <button
-                            onClick={() => handleModeratorRestrict(msg.userId)}
-                            className="p-1 hover:bg-red-100 rounded"
-                            title="Restrict user"
-                          >
-                            <Ban className="w-4 h-4 text-red-600" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <ChatMessage
+                    key={msg.id}
+                    msg={msg}
+                    isCurrentUser={msg.userId === user.id}
+                    onWarn={handleModeratorWarn}
+                    onRestrict={handleModeratorRestrict}
+                  />
                 ))}
               </div>
 
-              <div className="p-4 border-t flex space-x-2">
+              <div className="p-4 border-t border-white/10 glass-effect-light flex space-x-2">
                 <input
                   type="text"
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
                   onKeyPress={(e) => handleKeyPress(e, handleSendMessage)}
-                  placeholder={restrictedUsers.has(user.id) ? "You are restricted" : "Type a message..."}
+                  placeholder={restrictedUsers.has(user.id) ? "Communication Disabled" : "Share your thoughts..."}
                   disabled={restrictedUsers.has(user.id) || !wsConnected}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100"
+                  className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-purple-200/40 focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-white/5 transition-all"
                 />
                 <button
                   onClick={handleSendMessage}
                   disabled={restrictedUsers.has(user.id) || !wsConnected}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400 flex items-center space-x-2"
+                  className="px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 shadow-lg"
                 >
                   <Send className="w-4 h-4" />
-                  <span>Send</span>
+                  <span className="font-semibold">SEND</span>
                 </button>
               </div>
             </div>
           )}
 
           {activeTab === 'golive' && (
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-bold text-gray-800 mb-6">Start Live Stream</h2>
+            <div className="card-glass rounded-2xl p-8 border border-white/10 shadow-2xl overflow-hidden relative">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-blue-500"></div>
+              <h2 className="text-2xl font-black text-white mb-8 tracking-tight flex items-center space-x-3">
+                <div className="p-2 bg-red-500/10 rounded-lg border border-red-500/20">
+                  <Radio className="w-6 h-6 text-red-400" />
+                </div>
+                <span>Start Live Stream</span>
+              </h2>
 
               {!isStreaming ? (
-                <div className="space-y-4">
+                <div className="glass-effect-light rounded-xl p-6 border border-white/5 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-xs font-black text-purple-300 uppercase tracking-widest mb-2 px-1">
                       Stream Title
                     </label>
                     <input
@@ -811,13 +850,13 @@ const SocialModerationPlatform = () => {
                       value={streamTitle}
                       onChange={(e) => setStreamTitle(e.target.value)}
                       placeholder="What are you streaming?"
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
                     />
                   </div>
 
                   <button
                     onClick={handleStartStream}
-                    className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition flex items-center justify-center space-x-2"
+                    className="w-full bg-gradient-to-r from-red-600 to-red-800 text-white py-4 rounded-xl font-black uppercase tracking-[0.2em] hover:from-red-700 hover:to-red-900 transition-all shadow-xl flex items-center justify-center space-x-3"
                   >
                     <Radio className="w-5 h-5" />
                     <span>Go Live</span>
@@ -855,8 +894,8 @@ const SocialModerationPlatform = () => {
           )}
 
           {activeTab === 'live' && currentStream && (
-            <div className="bg-white rounded-lg shadow-md overflow-hidden">
-              <div className="bg-black aspect-video flex items-center justify-center">
+            <div className="chat-bg-gradient rounded-2xl shadow-2xl overflow-hidden border border-white/10 flex flex-col h-[calc(100vh-150px)]">
+              <div className="bg-black aspect-video flex items-center justify-center relative group">
                 {currentStream.streamerId === user.id ? (
                   <video
                     ref={videoRef}
@@ -867,27 +906,31 @@ const SocialModerationPlatform = () => {
                   />
                 ) : (
                   <div className="text-white text-center">
-                    <Video className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg">Watching: {currentStream.streamerName}</p>
-                    <p className="text-sm opacity-75 mt-2">{currentStream.title}</p>
+                    <Video className="w-16 h-16 mx-auto mb-4 text-purple-400 animate-pulse" />
+                    <p className="text-lg font-black tracking-tight">Watching: {currentStream.streamerName}</p>
+                    <p className="text-sm text-purple-200/40 mt-2">Transmitting from: {currentStream.streamerName}</p>
                   </div>
                 )}
+                <div className="absolute top-4 left-4 bg-red-600/80 backdrop-blur-md text-white px-3 py-1 rounded-full text-xs font-black tracking-widest flex items-center space-x-2">
+                  <span className="w-2 h-2 bg-white rounded-full animate-ping"></span>
+                  <span>LIVE</span>
+                </div>
               </div>
 
-              <div className="p-4 border-b flex items-center justify-between">
+              <div className="p-4 glass-effect-light border-b border-white/10 flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-gray-800">{currentStream.title}</h3>
-                  <p className="text-sm text-gray-600">{currentStream.streamerName}</p>
+                  <h3 className="font-black text-white tracking-tight">{currentStream.title}</h3>
+                  <p className="text-sm text-purple-200/60 font-bold uppercase tracking-widest">{currentStream.streamerName}</p>
                 </div>
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2 text-gray-600">
+                <div className="flex items-center space-x-6">
+                  <div className="flex items-center space-x-2 text-purple-300">
                     <Eye className="w-5 h-5" />
-                    <span className="font-semibold">{currentStream.viewers}</span>
+                    <span className="font-black">{currentStream.viewers}</span>
                   </div>
                   {currentStream.streamerId !== user.id && (
                     <button
                       onClick={handleLeaveStream}
-                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                      className="px-4 py-2 bg-white/5 text-white rounded-xl hover:bg-white/10 border border-white/10 transition-all font-bold text-xs uppercase tracking-widest"
                     >
                       Leave
                     </button>
@@ -895,99 +938,83 @@ const SocialModerationPlatform = () => {
                 </div>
               </div>
 
-              <div className="h-96 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
                 {getFilteredMessages().map(msg => (
-                  <div key={msg.id} className={`p-3 rounded-lg ${msg.flagged ? 'bg-red-50 border border-red-200' : 'bg-gray-50'}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-semibold text-gray-800">{msg.username}</span>
-                          <span className="text-xs text-gray-500">
-                            {msg.timestamp.toLocaleTimeString()}
-                          </span>
-                          {msg.flagged && (
-                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                              Flagged
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-gray-700 mt-1">{msg.text}</p>
-                      </div>
-                      {msg.userId !== user.id && !msg.flagged && (
-                        <div className="flex space-x-1 ml-2">
-                          <button
-                            onClick={() => handleModeratorWarn(msg.id, msg.userId)}
-                            className="p-1 hover:bg-yellow-100 rounded"
-                            title="Warn user"
-                          >
-                            <AlertTriangle className="w-4 h-4 text-yellow-600" />
-                          </button>
-                          <button
-                            onClick={() => handleModeratorRestrict(msg.userId)}
-                            className="p-1 hover:bg-red-100 rounded"
-                            title="Restrict user"
-                          >
-                            <Ban className="w-4 h-4 text-red-600" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <ChatMessage
+                    key={msg.id}
+                    msg={msg}
+                    isCurrentUser={msg.userId === user.id}
+                    onWarn={handleModeratorWarn}
+                    onRestrict={handleModeratorRestrict}
+                  />
                 ))}
               </div>
 
-              <div className="p-4 border-t flex space-x-2">
+              <div className="p-4 glass-effect-light border-t border-white/10 flex space-x-2">
                 <input
                   type="text"
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
                   onKeyPress={(e) => handleKeyPress(e, handleSendMessage)}
-                  placeholder={restrictedUsers.has(user.id) ? "You are restricted" : "Comment on stream..."}
+                  placeholder={restrictedUsers.has(user.id) ? "Transmission Blocked" : "Comment on stream..."}
                   disabled={restrictedUsers.has(user.id)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100"
+                  className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-purple-200/40 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
                 />
                 <button
                   onClick={handleSendMessage}
                   disabled={restrictedUsers.has(user.id)}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition disabled:bg-gray-400"
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 shadow-lg disabled:opacity-50"
                 >
-                  <Send className="w-4 h-4" />
+                  <Send className="w-5 h-5" />
                 </button>
               </div>
             </div>
           )}
 
           {activeTab === 'streams' && (
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-bold text-gray-800 mb-6">Live Streams</h2>
+            <div className="card-glass rounded-2xl p-8 shadow-2xl min-h-[500px]">
+              <h2 className="text-3xl font-black text-white mb-8 tracking-tighter flex items-center space-x-3">
+                <div className="p-2 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                  <Video className="w-6 h-6 text-blue-400" />
+                </div>
+                <span>Live Streams</span>
+              </h2>
 
               {liveStreams.filter(s => s.isLive).length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  <Video className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p>No live streams at the moment</p>
-                  <p className="text-sm mt-2">Be the first to go live!</p>
+                <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
+                  <Video className="w-20 h-20 mx-auto mb-6 text-purple-500/20" />
+                  <p className="text-xl font-bold text-purple-100/40">No live streams at the moment</p>
+                  <p className="text-sm text-purple-200/20 mt-2 uppercase tracking-widest font-black">Be the first to go live!</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {liveStreams.filter(s => s.isLive).map(stream => (
                     <div
                       key={stream.id}
-                      className="border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition cursor-pointer"
+                      className="glass-effect rounded-2xl overflow-hidden hover:border-purple-500/50 transition-all cursor-pointer group shadow-xl"
                       onClick={() => handleJoinStream(stream)}
                     >
-                      <div className="bg-gradient-to-br from-purple-500 to-blue-500 aspect-video flex items-center justify-center relative">
-                        <Video className="w-12 h-12 text-white opacity-75" />
-                        <div className="absolute top-3 left-3 bg-red-600 text-white px-2 py-1 rounded text-xs font-semibold flex items-center space-x-1">
-                          <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+                      <div className="bg-gradient-to-br from-purple-900 to-black aspect-video flex items-center justify-center relative">
+                        <Video className="w-16 h-16 text-purple-500/20 group-hover:text-purple-400/40 transition-colors" />
+                        <div className="absolute top-4 left-4 bg-red-600 text-white px-3 py-1 rounded-full text-[10px] font-black flex items-center space-x-2 tracking-widest shadow-lg">
+                          <span className="w-2 h-2 bg-white rounded-full animate-ping"></span>
                           <span>LIVE</span>
                         </div>
+                        <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-lg text-[10px] text-white font-bold flex items-center space-x-1">
+                          <Users className="w-3 h-3 text-purple-400" />
+                          <span>{stream.viewers}</span>
+                        </div>
                       </div>
-                      <div className="p-4">
-                        <h3 className="font-semibold text-gray-800 mb-1">{stream.title}</h3>
-                        <p className="text-sm text-gray-600 mb-2">{stream.streamerName}</p>
-                        <div className="flex items-center text-sm text-gray-500">
-                          <Eye className="w-4 h-4 mr-1" />
-                          <span>{stream.viewers} viewers</span>
+                      <div className="p-6">
+                        <h3 className="text-xl font-black text-white mb-2 group-hover:text-purple-300 transition-colors">{stream.title}</h3>
+                        <div className="flex items-center space-x-3 mt-4">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white font-bold text-xs">
+                            {stream.streamerName[0].toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-widest text-purple-200/60">{stream.streamerName}</p>
+                            <p className="text-[10px] text-purple-300/40 font-bold">TRANSMITTING SINCE {new Date(stream.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -997,114 +1024,142 @@ const SocialModerationPlatform = () => {
             </div>
           )}
           {activeTab === "posts" && (
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-bold text-gray-800 mb-4">Sharing Moments</h2>
+            <div className="card-glass rounded-2xl p-8 shadow-2xl relative">
+              <div className="mb-12 border-b border-white/10 pb-12">
+                <h2 className="text-3xl font-black text-white tracking-tighter flex items-center space-x-3 mb-6">
+                  <div className="p-2 bg-purple-500/10 rounded-lg border border-purple-500/20">
+                    <Heart className="w-6 h-6 text-purple-400" />
+                  </div>
+                  <span>Sharing Moments</span>
+                </h2>
 
-              {/* Create Post */}
-              <div className="mb-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <h3 className="text-md font-semibold mb-3">Share a photo</h3>
-                <div className="space-y-3">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                    ref={fileInputRef}
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 transition"
-                  />
-                  {previewUrl && (
-                    <div className="mt-2 text-center">
-                      <img src={previewUrl} alt="Preview" className="max-h-60 mx-auto rounded-lg shadow-sm" />
+                <div className="glass-effect-light rounded-2xl p-6 border border-white/5 shadow-inner">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-4">
+                      <label className="block text-xs font-black text-purple-300 uppercase tracking-widest mb-2 px-1">Share a photo</label>
+                      <div className="relative group">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageSelect}
+                          ref={fileInputRef}
+                          className="hidden"
+                          id="post-image-input"
+                        />
+                        <label
+                          htmlFor="post-image-input"
+                          className="flex items-center justify-center w-full aspect-square md:aspect-video rounded-xl border-2 border-dashed border-white/10 hover:border-purple-500/50 bg-white/5 hover:bg-white/10 transition-all cursor-pointer group overflow-hidden"
+                        >
+                          {previewUrl ? (
+                            <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="text-center">
+                              <Radio className="w-8 h-8 mx-auto mb-2 text-purple-400/40 group-hover:scale-110 transition-transform" />
+                              <span className="text-xs font-bold text-white/40 uppercase tracking-widest">Select Image</span>
+                            </div>
+                          )}
+                        </label>
+                      </div>
                     </div>
-                  )}
-                  <textarea
-                    value={newPostCaption}
-                    onChange={(e) => setNewPostCaption(e.target.value)}
-                    placeholder="Add a caption..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  />
-                  <button
-                    onClick={handleCreatePost}
-                    disabled={!newPostImage && !newPostCaption}
-                    className="w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition disabled:bg-gray-300"
-                  >
-                    Post
-                  </button>
+                    <div className="flex flex-col">
+                      <label className="block text-xs font-black text-purple-300 uppercase tracking-widest mb-2 px-1">Description</label>
+                      <textarea
+                        value={newPostCaption}
+                        onChange={(e) => setNewPostCaption(e.target.value)}
+                        placeholder="Add a caption..."
+                        className="flex-1 w-full px-4 py-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all resize-none mb-4"
+                      />
+                      <button
+                        onClick={handleCreatePost}
+                        disabled={!newPostImage && !newPostCaption}
+                        className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-4 rounded-xl font-black uppercase tracking-[0.2em] hover:from-purple-700 hover:to-blue-700 transition-all shadow-xl disabled:opacity-20 flex items-center justify-center space-x-2"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>Post</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Posts Feed */}
-              <div className="space-y-6">
+              <div className="max-w-2xl mx-auto space-y-12 pb-20">
                 {posts.map(post => (
-                  <div key={post.id} className="border rounded-lg overflow-hidden bg-white hover:shadow-lg transition">
-                    <div className="p-3 flex items-center space-x-2 border-b">
-                      <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center font-bold text-purple-700">
-                        {post.username[0].toUpperCase()}
+                  <div key={post.id} className="glass-effect rounded-3xl overflow-hidden hover:border-white/20 transition-all group shadow-2xl scale-[0.98] hover:scale-100">
+                    <div className="p-4 flex items-center justify-between border-b border-white/5 bg-white/5">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center font-black text-white shadow-lg overflow-hidden border border-white/20">
+                          {post.username[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-black text-white text-sm tracking-tight">{post.username}</p>
+                          <p className="text-[10px] text-purple-200/40 font-bold uppercase tracking-widest">
+                            {post.createdAt ? (post.createdAt.toDate ? post.createdAt.toDate() : new Date(post.createdAt)).toLocaleDateString() : 'REALTIME'}
+                          </p>
+                        </div>
                       </div>
-                      <span className="font-semibold text-gray-800">{post.username}</span>
+                      <div className="flex items-center space-x-2">
+                        {(String(user.id) === String(post.user_id || post.userId)) && (
+                          <button
+                            onClick={() => handleDeletePost(post.id, post.user_id || post.userId)}
+                            className="p-2 text-white/20 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setReportingPost(post)}
+                          className="p-2 text-white/20 hover:text-yellow-400 transition-colors"
+                        >
+                          <Flag className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
 
                     {post.is_rumour && (
-                      <div className="bg-red-50 border-l-4 border-red-500 p-3 mx-4 mt-3">
+                      <div className="bg-red-500/10 border-l-4 border-red-500 p-4 m-4 rounded-r-xl">
                         <div className="flex items-center">
-                          <AlertTriangle className="h-5 w-5 text-red-500 mr-2" />
-                          <p className="text-sm text-red-700 font-medium">
+                          <AlertTriangle className="h-5 w-5 text-red-500 mr-3" />
+                          <p className="text-xs text-red-400 font-black uppercase tracking-widest">
                             Fact Check: Potential False Information
                           </p>
                         </div>
                         {post.rumor_reason && (
-                          <p className="text-xs text-red-600 mt-1 ml-7">
-                            {post.rumor_reason}
+                          <p className="text-[11px] text-white/60 mt-2 ml-8 leading-relaxed italic">
+                            "{post.rumor_reason}"
                           </p>
                         )}
                       </div>
                     )}
 
                     {post.image && (
-                      <div className="relative group cursor-pointer" onClick={() => handleViewPost(post.id, post.image)}>
-                        <img src={post.image} alt="Post content" className="w-full object-cover max-h-96" />
-                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all flex items-center justify-center">
-                          <Eye className="text-white opacity-0 group-hover:opacity-100 transition-opacity w-8 h-8" />
+                      <div className="relative group cursor-pointer overflow-hidden" onClick={() => handleViewPost(post.id, post.image)}>
+                        <img src={post.image} alt="Post content" className="w-full object-cover max-h-[500px] transition-transform duration-700 group-hover:scale-105" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-8">
+                          <div className="flex items-center text-white space-x-2">
+                            <Eye className="w-5 h-5 text-purple-400" />
+                            <span className="font-bold">Full Resolution</span>
+                          </div>
                         </div>
                       </div>
                     )}
 
-                    <div className="p-4 space-y-2">
-                      <div className="flex items-center space-x-4">
+                    <div className="p-6 space-y-4">
+                      <div className="flex items-center space-x-6">
                         <button
                           onClick={() => handleLikePost(post)}
-                          className={`flex items-center space-x-1 transition ${post.is_liked ? 'text-red-500' : 'text-gray-500 hover:text-red-500'}`}
+                          className={`flex items-center space-x-2 transition-all ${post.is_liked ? 'text-red-500 scale-110' : 'text-white/40 hover:text-red-400'}`}
                         >
-                          <Heart className={`w-6 h-6 ${post.is_liked ? 'fill-current' : ''}`} />
-                          <span>{post.likes_count}</span>
+                          <Heart className={`w-6 h-6 ${post.is_liked ? 'fill-current shadow-[0_0_15px_rgba(239,68,68,0.5)]' : ''}`} />
+                          <span className="font-black text-lg">{post.likes_count}</span>
                         </button>
-                        <div className="flex items-center space-x-1 text-gray-500">
+                        <div className="flex items-center space-x-2 text-white/20">
                           <Eye className="w-6 h-6" />
-                          <span>{post.views}</span>
+                          <span className="font-black text-lg">{post.views}</span>
                         </div>
-                        <button
-                          onClick={() => setReportingPost(post)}
-                          className="flex items-center space-x-1 text-yellow-600 hover:text-yellow-700 transition ml-auto"
-                          title="Report Post"
-                        >
-                          <Flag className="w-5 h-5" />
-                          <span className="text-sm font-medium">Report</span>
-                        </button>
-                        {(String(user.id) === String(post.user_id || post.userId)) && (
-                          <button
-                            onClick={() => handleDeletePost(post.id, post.user_id || post.userId)}
-                            className="bg-red-50 text-red-600 p-1.5 rounded-lg hover:bg-red-100 transition ml-2"
-                            title="Delete Post"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        )}
                       </div>
-                      <p className="text-gray-700">
-                        <span className="font-semibold mr-2">{post.username}</span>
+                      <p className="text-purple-50 leading-relaxed text-sm">
+                        <span className="font-black text-purple-300 mr-2">@{post.username}</span>
                         {post.caption}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {post.createdAt ? (post.createdAt.toDate ? post.createdAt.toDate() : new Date(post.createdAt)).toLocaleDateString() : 'Just now'}
                       </p>
                     </div>
                   </div>
@@ -1117,16 +1172,16 @@ const SocialModerationPlatform = () => {
       {/* Image Modal */}
       {selectedImage && (
         <div
-          className="fixed inset-0 z-50 bg-black bg-opacity-90 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 animate-fade-in"
           onClick={() => setSelectedImage(null)}
         >
-          <div className="relative max-w-4xl max-h-[90vh] w-full h-full flex items-center justify-center">
+          <div className="relative max-w-5xl max-h-[90vh] w-full h-full flex items-center justify-center">
             <button
               onClick={() => setSelectedImage(null)}
-              className="absolute -top-10 right-0 text-white hover:text-gray-300 transition"
+              className="absolute -top-12 right-0 text-white/60 hover:text-white transition-all transform hover:rotate-90"
             >
-              <div className="bg-gray-800 rounded-full p-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="p-2 border border-white/20 rounded-full hover:bg-white/10">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </div>
@@ -1134,7 +1189,7 @@ const SocialModerationPlatform = () => {
             <img
               src={selectedImage}
               alt="Full view"
-              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+              className="max-w-full max-h-full object-contain rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/5"
               onClick={(e) => e.stopPropagation()}
             />
           </div>
@@ -1143,14 +1198,19 @@ const SocialModerationPlatform = () => {
 
       {/* Report Modal */}
       {reportingPost && (
-        <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-800">Report Post</h3>
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="card-glass rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-white/20">
+            <div className="p-8">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-black text-white tracking-tight flex items-center space-x-2">
+                  <div className="p-2 bg-red-500/10 rounded-lg">
+                    <Flag className="w-5 h-5 text-red-500" />
+                  </div>
+                  <span>Report Post</span>
+                </h3>
                 <button
                   onClick={() => setReportingPost(null)}
-                  className="text-gray-400 hover:text-gray-600 transition"
+                  className="text-white/20 hover:text-white transition-colors"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1158,48 +1218,48 @@ const SocialModerationPlatform = () => {
                 </button>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-black text-purple-300 uppercase tracking-widest mb-2 px-1">
                     Reason
                   </label>
                   <select
                     value={reportReason}
                     onChange={(e) => setReportReason(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-800 bg-white"
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white appearance-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   >
-                    <option value="">Select a reason</option>
-                    <option value="spam">Spam</option>
-                    <option value="hate_speech">Hate Speech</option>
-                    <option value="harassment">Harassment</option>
-                    <option value="misinformation">Misinformation</option>
-                    <option value="other">Other</option>
+                    <option value="" className="bg-[#0f0c29]">Select a reason</option>
+                    <option value="spam" className="bg-[#0f0c29]">Spam</option>
+                    <option value="hate_speech" className="bg-[#0f0c29]">Hate Speech</option>
+                    <option value="harassment" className="bg-[#0f0c29]">Harassment</option>
+                    <option value="misinformation" className="bg-[#0f0c29]">Misinformation</option>
+                    <option value="other" className="bg-[#0f0c29]">Other</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-black text-purple-300 uppercase tracking-widest mb-2 px-1">
                     Description (optional)
                   </label>
                   <textarea
                     value={reportDescription}
                     onChange={(e) => setReportDescription(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent h-24 text-gray-800 bg-white"
-                    placeholder="Provide more details..."
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:ring-2 focus:ring-purple-500 focus:border-transparent h-32 resize-none"
+                    placeholder="Describe the anomaly..."
                   />
                 </div>
 
-                <div className="flex space-x-3">
+                <div className="flex space-x-3 pt-4">
                   <button
                     onClick={() => setReportingPost(null)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+                    className="flex-1 px-4 py-3 border border-white/10 rounded-xl text-white hover:bg-white/5 transition-colors font-bold uppercase tracking-widest text-xs"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleReportPost}
                     disabled={!reportReason}
-                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:bg-gray-400"
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-red-600 to-red-800 text-white rounded-xl hover:from-red-700 hover:to-red-900 transition-all font-bold uppercase tracking-widest text-xs shadow-lg disabled:opacity-20"
                   >
                     Submit Report
                   </button>

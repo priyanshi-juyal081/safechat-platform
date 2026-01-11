@@ -166,7 +166,7 @@ class SpeechModerationConsumer(AsyncWebsocketConsumer):
 
                     elif new_count == 2:
                         print(f"🔇 Issuing WARNING 2/3 + TIMEOUT to user {user_id}")
-                        timeout_seconds = 60
+                        timeout_seconds = 10
                         try:
                             await self.issue_timeout(user_id, stream_id, timeout_seconds)
                         except Exception as e:
