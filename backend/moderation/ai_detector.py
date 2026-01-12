@@ -38,17 +38,18 @@ class ToxicityDetector:
 
     async def analyze_async(self, text: str) -> Dict:
         """Asynchronous analyze method (preferred)"""
-        if self.method == 'keyword':
-            return self.keyword_detector.detect(text)
-        elif self.method == 'transformer':
-            # Transformer is usually CPU bound, run in thread if needed, 
-            # or just call sync since it's local.
-            # ideally offload to threadpool
+        # Always run local keyword check first for speed and whitelist/custom rules
+        keyword_result = self.keyword_detector.detect(text)
+        if keyword_result['is_toxic']:
+            print(f"   [-] Local detector flagged: {keyword_result['detected_words']}")
+            return keyword_result
+
+        if self.method == 'transformer':
             return self.model_detector.detect(text)
         elif self.method == 'api':
             return await self.api_detector.detect_async(text)
         else:
-            return self.keyword_detector.detect(text)
+            return keyword_result
 
 
 # -------------------------------
@@ -71,20 +72,42 @@ class KeywordDetector:
             ],
             'low': [
                 'shut up', 'annoying', 'boring', 'lame',
-                'bad', 'terrible', 'awful', 'horrible'
+                'bad', 'terrible', 'awful', 'horrible',
+                'fuck', 'shit', 'fucking', 'damn'
             ]
         }
 
+        self.allowed_phrases = [
+            'what the fuck', 'wtf', 'damn it', 'holy shit', 
+            'no shit', 'bullshit', 'piece of shit'
+        ]
+
         self.harassment_patterns = [
             r'\bkys\b',
-            r'go die',
-            r'\bfuck(?:ing)?\b',
-            r'you\s+suck',
-            r'kill(?:\s+yourself)?',
+            r'\bgo\s+die\b',
+            # Targeted profanity: "you fuck", "fuck you", etc.
+            r'\byou\s+.*fuck',
+            r'\bfuck\s+you',
+            r'\byou\s+suck',
+            r'\bkill\s+yourself\b',
+            r'\bkill\s+you\b',
+            r'\bkilling\s+you\b',
+        ]
+
+        self.compliment_keywords = [
+            'gorgeous', 'beautiful', 'amazing', 'stunning', 'wonderful',
+            'great', 'awesome', 'lovely', 'pretty', 'handsome', 'perfect',
+            'intelligent', 'smart', 'kind', 'friendly'
         ]
 
     def detect(self, text: str) -> Dict:
         text_lower = text.lower()
+        
+        # 0. Strip whitelisted phrases first to prevent detection
+        temp_text = text_lower
+        for phrase in self.allowed_phrases:
+            temp_text = temp_text.replace(phrase, " [CLEANED] ")
+
         detected_words = []
         severity_scores = {'high': 0, 'medium': 0, 'low': 0}
 
@@ -96,7 +119,8 @@ class KeywordDetector:
         for severity, keywords in self.toxic_keywords.items():
             for keyword in keywords:
                 pattern = make_fuzzy_pattern(keyword)
-                if keyword in text_lower or re.search(pattern, text_lower):
+                # Check against the cleaned text
+                if re.search(pattern, temp_text):
                     detected_words.append(keyword)
                     severity_scores[severity] += 1
 
@@ -108,10 +132,13 @@ class KeywordDetector:
         toxicity_score = (
             severity_scores['high'] * 1.0 +
             severity_scores['medium'] * 0.6 +
-            severity_scores['low'] * 0.3
+            severity_scores['low'] * 0.2
         )
-        toxicity_score = min(toxicity_score / 3.0, 1.0)
-        is_toxic = toxicity_score > 0.3
+        toxicity_score = min(toxicity_score / 1.5, 1.0)
+        
+        is_toxic = toxicity_score >= 0.4 or severity_scores['high'] > 0
+
+        print(f"   [DEBUG] Keyword detector: is_toxic={is_toxic}, score={toxicity_score}, words={detected_words}")
 
         return {
             'is_toxic': is_toxic,
@@ -199,10 +226,36 @@ class APIDetector:
         
         # Calculate max toxicity score
         toxicity_score = max(scores.values()) if scores else 0.0
+        print(f"   [DEBUG] OpenAI Scores: {scores}")
+        print(f"   [DEBUG] Max Score: {toxicity_score}")
+        
+        # Initial flagging decision
+        is_toxic = result.flagged or any(score > 0.7 for score in scores.values())
+        
+        # Override for whitelisted phrases
+        if is_toxic:
+            keyword_detector = KeywordDetector()
+            text_lower = text.lower().strip()
+            for phrase in keyword_detector.allowed_phrases:
+                clean_text = re.sub(r'[^\w\s]', '', text_lower)
+                clean_phrase = re.sub(r'[^\w\s]', '', phrase)
+                if clean_text == clean_phrase or (phrase in text_lower and len(text_lower) < len(phrase) + 5):
+                    print(f"   [-] Overriding OpenAI flag for whitelisted phrase: '{phrase}'")
+                    is_toxic = False
+                    break
+            
+            # Additional override for compliments
+            if is_toxic:
+                for compliment in KeywordDetector().compliment_keywords:
+                    if compliment in text_lower:
+                        # Only override if it's not a severe violation (e.g. not hate speech score > 0.9)
+                        if toxicity_score < 0.85:
+                            print(f"   [-] Overriding OpenAI flag for compliment: '{compliment}'")
+                            is_toxic = False
+                            break
 
-        # If OpenAI flags the content
-        if result.flagged:
-            print(f"   [+] OpenAI flagged as TOXIC!")
+        if is_toxic:
+            print(f"   [+] OpenAI flagged as TOXIC! (Score: {toxicity_score})")
             return {
                 'is_toxic': True,
                 'toxicity_score': toxicity_score,
@@ -211,19 +264,6 @@ class APIDetector:
                 'method': 'openai_moderation'
             }
 
-        # Also check if any individual category score is high (threshold: 0.7)
-        high_score_categories = [cat for cat, score in scores.items() if score > 0.7]
-        if high_score_categories:
-            print(f"   [+] High scores detected in: {high_score_categories}")
-            return {
-                'is_toxic': True,
-                'toxicity_score': toxicity_score,
-                'categories': scores,
-                'detected_words': high_score_categories,
-                'method': 'openai_moderation'
-            }
-        
-        # Safe return
         return {
             'is_toxic': False,
             'toxicity_score': toxicity_score,
@@ -245,7 +285,7 @@ class APIDetector:
                 print(f"   Text: '{text}'")
 
                 response = client.moderations.create(
-                    model="omni-moderation-latest",
+                    model="text-moderation-latest",
                     input=text
                 )
                 result = response.results[0]
@@ -277,7 +317,7 @@ class APIDetector:
                 # print(f"   Text: '{text}'")
 
                 response = await client.moderations.create(
-                    model="omni-moderation-latest",
+                    model="text-moderation-latest",
                     input=text
                 )
                 result = response.results[0]

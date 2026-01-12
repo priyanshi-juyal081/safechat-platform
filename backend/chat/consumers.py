@@ -81,6 +81,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 toxicity_score = toxicity_result['toxicity_score']
 
                 if is_toxic:
+                    # Increment messages_sent and messages_blocked for the user
+                    await self.increment_user_stat(server_user_id, 'messages_sent')
+                    await self.increment_user_stat(server_user_id, 'messages_blocked')
+                    
                     # Do not save or broadcast toxic messages; issue a warning and possibly restrict
                     warning_count = await self.issue_warning(server_user_id, None)
                     if warning_count >= 3:
@@ -96,6 +100,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             'message': f'Warning {warning_count}/3: Your message contains inappropriate content'
                         }))
                     return
+
+                # Increment messages_sent for the user
+                await self.increment_user_stat(server_user_id, 'messages_sent')
 
                 # Save non-toxic message to database and broadcast
                 message = await self.save_message(
@@ -146,6 +153,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'timestamp': msg.created_at.isoformat(),
         } for msg in reversed(messages)]
     
+    @database_sync_to_async
+    def increment_user_stat(self, user_id, field):
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+            current_val = getattr(user, field, 0)
+            setattr(user, field, current_val + 1)
+            user.save()
+            print(f"   [+] Stats: Incremented {field} for user {user.username}")
+        except Exception as e:
+            print(f"   [!] Stats Error: {e}")
+
     @database_sync_to_async
     def save_message(self, user_id, text, stream_id, is_flagged, toxicity_score):
         try:
@@ -296,6 +315,10 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 toxicity_score = toxicity_result['toxicity_score']
 
                 if is_toxic:
+                    # Increment messages_sent and messages_blocked for the user
+                    await self.increment_user_stat(server_user_id, 'messages_sent')
+                    await self.increment_user_stat(server_user_id, 'messages_blocked')
+                    
                     # Issue warning without saving the message and don't broadcast
                     warning_count = await self.issue_warning(server_user_id, None)
                     if warning_count >= 3:
@@ -311,6 +334,9 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                             'message': f'Warning {warning_count}/3: Inappropriate content'
                         }))
                     return
+
+                # Increment messages_sent for the user
+                await self.increment_user_stat(server_user_id, 'messages_sent')
 
                 # Save non-toxic message to database and broadcast
                 message = await self.save_message(
@@ -361,6 +387,17 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
             'timestamp': msg.created_at.isoformat(),
         } for msg in reversed(messages)]
     
+    @database_sync_to_async
+    def increment_user_stat(self, user_id, field):
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+            current_val = getattr(user, field, 0)
+            setattr(user, field, current_val + 1)
+            user.save()
+        except:
+            pass
+
     @database_sync_to_async
     def save_message(self, user_id, text, stream_id, is_flagged, toxicity_score):
         try:
@@ -422,8 +459,34 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
         except:
             return False
     
+    @database_sync_to_async
+    def issue_warning(self, user_id, message_id):
+        from moderation.models import Warning
+        User = get_user_model()
+        user = User.objects.get(id=user_id)
+        message = Message.objects.get(id=message_id) if message_id else None
+
+        Warning.objects.create(
+            user=user,
+            message=message,
+            reason="Automatic: Toxic content detected",
+            is_automatic=True
+        )
+
+        return Warning.objects.filter(user=user).count()
     
-    
+    @database_sync_to_async
+    def restrict_user(self, user_id):
+        from moderation.models import Restriction
+        User = get_user_model()
+        user = User.objects.get(id=user_id)
+        
+        Restriction.objects.create(
+            user=user,
+            restriction_type='chat',
+            reason="Automatic: warnings for toxic behavior",
+            is_permanent=False
+        )
 
 
 class StreamConsumer(AsyncWebsocketConsumer):
