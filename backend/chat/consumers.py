@@ -81,24 +81,46 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 toxicity_score = toxicity_result['toxicity_score']
 
                 if is_toxic:
-                    # Increment messages_sent and messages_blocked for the user
+                    # Increment messages_sent for the user
                     await self.increment_user_stat(server_user_id, 'messages_sent')
-                    await self.increment_user_stat(server_user_id, 'messages_blocked')
                     
-                    # Do not save or broadcast toxic messages; issue a warning and possibly restrict
-                    warning_count = await self.issue_warning(server_user_id, None)
-                    if warning_count >= 3:
-                        await self.restrict_user(server_user_id)
-                        await self.send(text_data=json.dumps({
-                            'type': 'restriction',
-                            'message': 'You have been restricted from chatting due to repeated violations'
-                        }))
+                    # Get masked text
+                    broadcast_text = toxicity_result.get('masked_text', message_text)
+                    
+                    # Save the MASKED message to DB and broadcast
+                    message = await self.save_message(
+                        server_user_id,
+                        broadcast_text,
+                        None,
+                        True, # Flagged
+                        toxicity_score
+                    )
+
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {
+                            'type': 'chat_message',
+                            'message': message
+                        }
+                    )
+                    
+                    # Issue warning ONLY if should_warn is true
+                    if toxicity_result.get('should_warn', True):
+                        warning_count = await self.issue_warning(server_user_id, None)
+                        if warning_count >= 3:
+                            await self.restrict_user(server_user_id)
+                            await self.send(text_data=json.dumps({
+                                'type': 'restriction',
+                                'message': 'You have been restricted from chatting due to repeated violations'
+                            }))
+                        else:
+                            await self.send(text_data=json.dumps({
+                                'type': 'warning',
+                                'warning_count': warning_count,
+                                'message': f'Warning {warning_count}/3: Your message contained inappropriate content and was masked.'
+                            }))
                     else:
-                        await self.send(text_data=json.dumps({
-                            'type': 'warning',
-                            'warning_count': warning_count,
-                            'message': f'Warning {warning_count}/3: Your message contains inappropriate content'
-                        }))
+                        print(f"   [MESSAGING] Masked message sent without warning due to positive sentiment.")
                     return
 
                 # Increment messages_sent for the user
@@ -315,24 +337,46 @@ class StreamChatConsumer(AsyncWebsocketConsumer):
                 toxicity_score = toxicity_result['toxicity_score']
 
                 if is_toxic:
-                    # Increment messages_sent and messages_blocked for the user
+                    # Increment messages_sent for the user
                     await self.increment_user_stat(server_user_id, 'messages_sent')
-                    await self.increment_user_stat(server_user_id, 'messages_blocked')
                     
-                    # Issue warning without saving the message and don't broadcast
-                    warning_count = await self.issue_warning(server_user_id, None)
-                    if warning_count >= 3:
-                        await self.restrict_user(server_user_id)
-                        await self.send(text_data=json.dumps({
-                            'type': 'restriction',
-                            'message': 'You have been restricted from chatting'
-                        }))
+                    # Get masked text
+                    broadcast_text = toxicity_result.get('masked_text', message_text)
+                    
+                    # Save masked message and broadcast
+                    message = await self.save_message(
+                        server_user_id,
+                        broadcast_text,
+                        self.stream_id,
+                        True, # Flagged
+                        toxicity_score
+                    )
+
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {
+                            'type': 'chat_message',
+                            'message': message
+                        }
+                    )
+                    
+                    # Issue warning ONLY if should_warn is true
+                    if toxicity_result.get('should_warn', True):
+                        warning_count = await self.issue_warning(server_user_id, None)
+                        if warning_count >= 3:
+                            await self.restrict_user(server_user_id)
+                            await self.send(text_data=json.dumps({
+                                'type': 'restriction',
+                                'message': 'You have been restricted from chatting'
+                            }))
+                        else:
+                            await self.send(text_data=json.dumps({
+                                'type': 'warning',
+                                'warning_count': warning_count,
+                                'message': f'Warning {warning_count}/3: Inappropriate content was masked'
+                            }))
                     else:
-                        await self.send(text_data=json.dumps({
-                            'type': 'warning',
-                            'warning_count': warning_count,
-                            'message': f'Warning {warning_count}/3: Inappropriate content'
-                        }))
+                        print(f"   [STREAM] Masked message sent without warning due to positive sentiment.")
                     return
 
                 # Increment messages_sent for the user

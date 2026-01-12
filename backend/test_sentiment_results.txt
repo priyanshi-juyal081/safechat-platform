@@ -1,0 +1,44 @@
+﻿
+--- Sentiment-Aware Moderation Test ---
+
+[?] Calling Sightengine API for: 'you look so fucking gorgeous'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'you look so fucking gorgeous'
+   [DETECTION] is_toxic: True, score: 1.0, words: ['fucking', 'fucking', 'harassment_pattern']
+   [SENTIMENT] Positive sentiment detected (0.6779), skipping warning.
+Text:    'you look so fucking gorgeous'
+Masked:  'you look so f****** gorgeous'
+Result:  [TOXIC] (Sentiment: 0.68)
+Warning: NO
+----------------------------------------
+
+[?] Calling Sightengine API for: 'you are a fucking idiot'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'you are a fucking idiot'
+   [DETECTION] is_toxic: True, score: 1.0, words: ['idiot', 'fucking', 'fucking', 'harassment_pattern']
+Text:    'you are a fucking idiot'
+Masked:  'you are a f****** idiot'
+Result:  [TOXIC] (Sentiment: -0.56)
+Warning: YES
+----------------------------------------
+
+[?] Calling Sightengine API for: 'i love this fucking song'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'i love this fucking song'
+   [DETECTION] is_toxic: True, score: 0.5333333333333333, words: ['fucking', 'fucking']
+   [SENTIMENT] Positive sentiment detected (0.6369), skipping warning.
+Text:    'i love this fucking song'
+Masked:  'i love this f****** song'
+Result:  [TOXIC] (Sentiment: 0.64)
+Warning: NO
+----------------------------------------
+
+[?] Calling Sightengine API for: 'i will fucking kill you'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'i will fucking kill you'
+   [DETECTION] is_toxic: True, score: 1.0, words: ['kill', 'fucking', 'fucking', 'harassment_pattern']
+Text:    'i will fucking kill you'
+Masked:  'i will f****** k*** you'
+Result:  [TOXIC] (Sentiment: -0.72)
+Warning: YES
+----------------------------------------

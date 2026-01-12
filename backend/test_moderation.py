@@ -19,18 +19,22 @@ async def test_moderation():
         "stabbing someone is fun",
         "you are a nice person",
         "kill yourself",
-        "kys"
+        "kys",
+        "i will end you today",
+        "you are looking so fucking gorgeous"
     ]
     
     print("\n--- Moderation Test Results ---")
     for phrase in test_phrases:
         result = await detector.analyze_async(phrase)
-        status = "❌ TOXIC" if result['is_toxic'] else "✅ CLEAN"
+        status = "TOXIC" if result['is_toxic'] else "CLEAN"
         score = result['toxicity_score']
         method = result['method']
         words = result.get('detected_words', [])
+        masked = result.get('masked_text', 'N/A')
         print(f"[{status}] (Score: {score:.2f}, Method: {method})")
-        print(f"   Text: '{phrase}'")
+        print(f"   Text:   '{phrase}'")
+        print(f"   Masked: '{masked}'")
         if words:
             print(f"   Words: {words}")
         print("-" * 30)

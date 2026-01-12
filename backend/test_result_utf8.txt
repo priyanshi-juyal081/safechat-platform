@@ -1,0 +1,85 @@
+﻿
+--- Moderation Test Results ---
+
+[?] Calling Sightengine API for: 'i will stab you'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'i will stab you'
+   [DETECTION] is_toxic: True, score: 1.0, words: ['stab', 'harassment_pattern', 'harassment_pattern']
+[TOXIC] (Score: 1.00, Method: keyword)
+   Text:   'i will stab you'
+   Masked: 'i will stab you'
+   Words: ['stab', 'harassment_pattern', 'harassment_pattern']
+------------------------------
+
+[?] Calling Sightengine API for: 'I will shoot you'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'i will shoot you'
+   [DETECTION] is_toxic: True, score: 1.0, words: ['shoot', 'harassment_pattern', 'harassment_pattern']
+[TOXIC] (Score: 1.00, Method: keyword)
+   Text:   'I will shoot you'
+   Masked: 'I will shoot you'
+   Words: ['shoot', 'harassment_pattern', 'harassment_pattern']
+------------------------------
+
+[?] Calling Sightengine API for: 'stabbing someone is fun'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'stabbing someone is fun'
+   [DETECTION] is_toxic: False, score: 0.0, words: []
+   [DETECTION] Text: 'stabbing someone is fun'
+   [DETECTION] is_toxic: False, score: 0.0, words: []
+[CLEAN] (Score: 0.00, Method: keyword)
+   Text:   'stabbing someone is fun'
+   Masked: 'stabbing someone is fun'
+------------------------------
+
+[?] Calling Sightengine API for: 'you are a nice person'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'you are a nice person'
+   [DETECTION] is_toxic: False, score: 0.0, words: []
+   [DETECTION] Text: 'you are a nice person'
+   [DETECTION] is_toxic: False, score: 0.0, words: []
+[CLEAN] (Score: 0.00, Method: keyword)
+   Text:   'you are a nice person'
+   Masked: 'you are a nice person'
+------------------------------
+
+[?] Calling Sightengine API for: 'kill yourself'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'kill yourself'
+   [DETECTION] is_toxic: True, score: 1.0, words: ['kill', 'harassment_pattern']
+[TOXIC] (Score: 1.00, Method: keyword)
+   Text:   'kill yourself'
+   Masked: 'k*** yourself'
+   Words: ['kill', 'harassment_pattern']
+------------------------------
+
+[?] Calling Sightengine API for: 'kys'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'kys'
+   [DETECTION] is_toxic: True, score: 0.6666666666666666, words: ['harassment_pattern']
+[TOXIC] (Score: 0.67, Method: keyword)
+   Text:   'kys'
+   Masked: 'kys'
+   Words: ['harassment_pattern']
+------------------------------
+
+[?] Calling Sightengine API for: 'i will end you today'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'i will end you today'
+   [DETECTION] is_toxic: False, score: 0.0, words: []
+   [DETECTION] Text: 'i will end you today'
+   [DETECTION] is_toxic: False, score: 0.0, words: []
+[CLEAN] (Score: 0.00, Method: keyword)
+   Text:   'i will end you today'
+   Masked: 'i will end you today'
+------------------------------
+
+[?] Calling Sightengine API for: 'you are looking so fucking gorgeous'
+   [!] Sightengine error: 400
+   [DETECTION] Text: 'you are looking so fucking gorgeous'
+   [DETECTION] is_toxic: True, score: 1.0, words: ['fucking', 'fucking', 'harassment_pattern']
+[TOXIC] (Score: 1.00, Method: keyword)
+   Text:   'you are looking so fucking gorgeous'
+   Masked: 'you are looking so f****** gorgeous'
+   Words: ['fucking', 'fucking', 'harassment_pattern']
+------------------------------

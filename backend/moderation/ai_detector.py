@@ -5,6 +5,17 @@ import asyncio
 import requests
 import httpx
 from typing import Dict, List, Tuple
+from better_profanity import profanity
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+# Initialize sentiment analyzer
+sentiment_analyzer = SentimentIntensityAnalyzer()
+
+# Initialize profanity detector
+profanity.load_censor_words() # Load default words
+profanity.add_censor_words([
+    'fuckwad', 'dickhead', 'shithead', 'pussy', 'cunt', 'faggot', 'fuck'
+]) # Add some extras 
 
 # -------------------------------
 # Main Detector
@@ -23,7 +34,7 @@ class ToxicityDetector:
         if method == 'transformer':
             self.model_detector = TransformerDetector()
         elif method == 'api':
-            self.api_detector = APIDetector()
+            self.api_detector = SightengineDetector() # Switch to Sightengine
 
     def analyze(self, text: str) -> Dict:
         """Synchronous analyze method (legacy/fallback)"""
@@ -38,18 +49,53 @@ class ToxicityDetector:
 
     async def analyze_async(self, text: str) -> Dict:
         """Asynchronous analyze method (preferred)"""
-        # Always run local keyword check first for speed and whitelist/custom rules
-        keyword_result = self.keyword_detector.detect(text)
-        if keyword_result['is_toxic']:
-            print(f"   [-] Local detector flagged: {keyword_result['detected_words']}")
-            return keyword_result
+        if self.method == 'api':
+            api_result = await self.api_detector.detect_async(text)
+            
+            # Add masking to result
+            api_result['masked_text'] = mask_text(text)
+            
+            # Add sentiment score
+            sentiment = sentiment_analyzer.polarity_scores(text)
+            api_result['sentiment_score'] = sentiment['compound']
+            
+            # Determine if we should warn
+            # We warn IF it's toxic AND (sentiment is NOT positive OR it's a specific high-score violation like insult)
+            is_positive = sentiment['compound'] > 0.4
+            
+            # If Sightengine flagged it as an insult strictly, we might still warn
+            is_insult = api_result.get('categories', {}).get('insult', 0) > 0.7
+            
+            if api_result['is_toxic']:
+                # If it's a positive sentiment and NOT a direct insult, skip warning
+                if is_positive and not is_insult:
+                    api_result['should_warn'] = False
+                    print(f"   [SENTIMENT] Positive sentiment detected ({sentiment['compound']}), skipping warning.")
+                else:
+                    api_result['should_warn'] = True
+                return api_result
+            
+            # 2. Safety Fallback: Keyword check
+            keyword_result = self.keyword_detector.detect(text)
+            keyword_result['masked_text'] = api_result['masked_text']
+            keyword_result['sentiment_score'] = sentiment['compound']
+            
+            if keyword_result['is_toxic']:
+                if is_positive:
+                    keyword_result['should_warn'] = False
+                    print(f"   [SENTIMENT] Positive sentiment detected ({sentiment['compound']}), skipping warning (fallback).")
+                else:
+                    keyword_result['should_warn'] = True
+                return keyword_result
+            
+            api_result['should_warn'] = False
+            return api_result
 
+        # Other methods (transformer or direct keyword)
         if self.method == 'transformer':
             return self.model_detector.detect(text)
-        elif self.method == 'api':
-            return await self.api_detector.detect_async(text)
         else:
-            return keyword_result
+            return self.keyword_detector.detect(text)
 
 
 # -------------------------------
@@ -70,7 +116,7 @@ class KeywordDetector:
             'medium': [
                 'stupid', 'idiot', 'dumb', 'moron', 'loser', 'pathetic',
                 'trash', 'garbage', 'worthless', 'useless', 'disgusting',
-                'fuck', 'shit', 'bitch', 'asshole', 'fucking'
+                'fuck', 'shit', 'bitch', 'asshole', 'fucking', 'fuckwad', 'dickhead'
             ],
             'low': [
                 'shut up', 'annoying', 'boring', 'lame',
@@ -204,8 +250,129 @@ class TransformerDetector:
             return KeywordDetector().detect(text)
 
 
-# -------------------------------
-# API Detector (OPENAI)
+def mask_text(text: str) -> str:
+    """Masks profane words keeping the first letter and hashing the rest"""
+    try:
+        from better_profanity import profanity
+        # Use better-profanity to find what to mask
+        # It has a censor method, but we want a custom format
+        words = text.split()
+        masked_words = []
+        
+        for word in words:
+            # Check if word contains profanity
+            if profanity.contains_profanity(word):
+                # Mask it: keep first alphanumeric char, '*' for rest of alphanumeric chars
+                # We handle punctuation around the word
+                match = re.search(r'^(\W*)([a-zA-Z0-9])(.*)$', word)
+                if match:
+                    prefix, first, rest = match.groups()
+                    masked_rest = re.sub(r'[a-zA-Z0-9]', '*', rest)
+                    masked_words.append(prefix + first + masked_rest)
+                else:
+                    # Fallback for words that might not match the regex but are profane
+                    masked_words.append(word[0] + '*' * (len(word) - 1))
+            else:
+                masked_words.append(word)
+        return ' '.join(masked_words)
+    except Exception as e:
+        print(f"Masking error: {e}")
+        return text
+
+
+class SightengineDetector:
+    """
+    Uses Sightengine Text Moderation API
+    """
+    def __init__(self):
+        try:
+            from django.conf import settings
+            self.api_user = getattr(settings, 'SIGHTENGINE_API_USER', os.getenv('SIGHTENGINE_API_USER'))
+            self.api_secret = getattr(settings, 'SIGHTENGINE_API_SECRET', os.getenv('SIGHTENGINE_API_SECRET'))
+        except:
+            self.api_user = os.getenv('SIGHTENGINE_API_USER')
+            self.api_secret = os.getenv('SIGHTENGINE_API_SECRET')
+            
+        self.api_url = "https://api.sightengine.com/1.0/check.json"
+        
+        if not self.api_user or not self.api_secret:
+            print("[!] Sightengine credentials missing!")
+
+    async def detect_async(self, text: str) -> Dict:
+        if not self.api_user or not self.api_secret:
+            print("[!] Sightengine credentials missing, falling back to keywords")
+            return KeywordDetector().detect(text)
+
+        try:
+            params = {
+                'text': text,
+                'lang': 'en',
+                'mode': 'rules,ml',
+                'api_user': self.api_user,
+                'api_secret': self.api_secret,
+            }
+
+            print(f"\n[?] Calling Sightengine API for: '{text}'")
+            async with httpx.AsyncClient(verify=False) as client: # Bypass SSL issues in local dev
+                response = await client.get(self.api_url, params=params, timeout=10)
+            
+            if response.status_code != 200:
+                print(f"   [!] Sightengine error: {response.status_code}")
+                return KeywordDetector().detect(text)
+
+            data = response.json()
+            
+            # Extract profanity matches
+            profanity_matches = data.get('profanity', {}).get('matches', [])
+            is_toxic = len(profanity_matches) > 0
+            
+            # Check ML scores if rules didn't catch it
+            categories = {}
+            if 'class' in data:
+                categories = data['class'] # Sightengine uses 'class' for ML scores
+                # Flag if any score is high
+                if any(score > 0.5 for score in categories.values()):
+                    is_toxic = True
+            
+            toxicity_score = max(categories.values()) if categories else (1.0 if is_toxic else 0.0)
+
+            return {
+                'is_toxic': is_toxic,
+                'toxicity_score': toxicity_score,
+                'categories': categories,
+                'detected_words': [m.get('word') for m in profanity_matches],
+                'method': 'sightengine'
+            }
+        except Exception as e:
+            print(f"   [!] Sightengine Async error: {e}")
+            return KeywordDetector().detect(text)
+
+    def detect(self, text: str) -> Dict:
+        # Simple sync wrapper
+        if not self.api_user or not self.api_secret:
+            return KeywordDetector().detect(text)
+            
+        try:
+            params = {
+                'text': text,
+                'lang': 'en',
+                'mode': 'rules,ml',
+                'api_user': self.api_user,
+                'api_secret': self.api_secret,
+            }
+            response = requests.get(self.api_url, params=params, timeout=10)
+            data = response.json()
+            profanity_matches = data.get('profanity', {}).get('matches', [])
+            is_toxic = len(profanity_matches) > 0 or any(score > 0.5 for score in data.get('class', {}).values())
+            return {
+                'is_toxic': is_toxic,
+                'toxicity_score': 0.8 if is_toxic else 0.0,
+                'method': 'sightengine'
+            }
+        except:
+            return KeywordDetector().detect(text)
+
+
 # -------------------------------
 
 class APIDetector:
@@ -217,6 +384,8 @@ class APIDetector:
         self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             print("[!] OPENAI_API_KEY not set in environment!")
+        else:
+            print(f"[*] APIDetector initialized with key: {self.api_key[:8]}...")
 
     def detect(self, text: str) -> Dict:
         """Synchronous detection"""
@@ -244,8 +413,11 @@ class APIDetector:
         
         # Calculate max toxicity score
         toxicity_score = max(scores.values()) if scores else 0.0
-        print(f"   [DEBUG] OpenAI Scores: {scores}")
-        print(f"   [DEBUG] Max Score: {toxicity_score}")
+        
+        # ALWAYS print scores for debugging
+        print(f"\n   [API DEBUG] Text: '{text}'")
+        print(f"   [API DEBUG] Scores: {scores}")
+        print(f"   [API DEBUG] Max Score: {toxicity_score:.4f}, Flagged by OpenAI: {result.flagged}")
         
         # Initial flagging decision
         is_toxic = result.flagged or any(score > 0.7 for score in scores.values())
@@ -273,7 +445,10 @@ class APIDetector:
                             break
 
         if is_toxic:
-            print(f"   [+] OpenAI flagged as TOXIC! (Score: {toxicity_score})")
+            print(f"\n[!] TOXICITY DETECTED")
+            print(f"    Method: OpenAI API")
+            print(f"    Max Score: {toxicity_score:.4f}")
+            print(f"    Categories: {[cat for cat, score in scores.items() if score > 0.5]}")
             return {
                 'is_toxic': True,
                 'toxicity_score': toxicity_score,
@@ -311,15 +486,16 @@ class APIDetector:
 
             except Exception as e:
                 msg = str(e)
-                print(f"   [X] OpenAI moderation error (attempt {attempt}/{max_attempts}): {e}")
+                print(f"   [X] OpenAI moderation error (attempt {attempt}/{max_attempts}):")
+                print(f"       {msg}")
                 
                 if attempt < max_attempts and ("too many requests" in msg.lower() or "429" in msg):
-                    print(f"   [!] Rate limited, waiting {backoff} seconds...")
+                    print(f"   [!] Rate limited or quota exceeded, waiting {backoff} seconds...")
                     time.sleep(backoff)
                     backoff *= 2
                     continue
                 
-                print(f"   [!] Falling back to keyword detector")
+                print(f"   [!] Falling back to keyword detector due to persistent error")
                 return KeywordDetector().detect(text)
 
     async def _openai_moderation_async(self, text: str) -> Dict:
@@ -343,16 +519,17 @@ class APIDetector:
 
             except Exception as e:
                 msg = str(e)
-                print(f"   [X] OpenAI Async moderation error (attempt {attempt}/{max_attempts}): {e}")
+                print(f"   [X] OpenAI Async moderation error (attempt {attempt}/{max_attempts}):")
+                print(f"       {msg}")
                 
                 # If rate limited, retry
                 if attempt < max_attempts and ("too many requests" in msg.lower() or "429" in msg):
-                    print(f"   [!] Rate limited, waiting {backoff} seconds...")
+                    print(f"   [!] Rate limited or quota exceeded, waiting {backoff} seconds...")
                     await asyncio.sleep(backoff)
                     backoff *= 2
                     continue
                 
-                print(f"   [!] Falling back to keyword detector")
+                print(f"   [!] Falling back to keyword detector due to persistent error")
                 return KeywordDetector().detect(text)
 
 
