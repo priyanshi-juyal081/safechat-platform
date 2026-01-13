@@ -49,6 +49,15 @@ class ToxicityDetector:
 
     async def analyze_async(self, text: str) -> Dict:
         """Asynchronous analyze method (preferred)"""
+        text_lower = text.lower()
+        
+        # Pre-check for motivational context to guide sentiment
+        kw_detector = self.keyword_detector
+        found_motivational = any(word in text_lower for word in kw_detector.motivational_keywords)
+        found_compliment = any(word in text_lower for word in kw_detector.compliment_keywords)
+        has_positive_context = found_motivational or found_compliment
+
+        # 1. API Check if enabled
         if self.method == 'api':
             api_result = await self.api_detector.detect_async(text)
             
@@ -57,20 +66,38 @@ class ToxicityDetector:
             
             # Add sentiment score
             sentiment = sentiment_analyzer.polarity_scores(text)
-            api_result['sentiment_score'] = sentiment['compound']
+            compound_score = sentiment['compound']
+            
+            # Contextual Sentiment Adjustment:
+            # If we see motivational keywords, we "neutralize" the impact of soft profanity on VADER
+            if has_positive_context:
+                # If sentiment is negative but contain motivational words, it's likely just the profanity dragging it down
+                if compound_score <= 0: # Handle 0.0 case too
+                    # Search for soft profanity that might be dragging it down
+                    soft_profanity = ['fuck', 'shit', 'fucking', 'damn', 'fuck it']
+                    if any(p in text_lower for p in soft_profanity):
+                        # Boost it toward neutral or positive
+                        # Use a larger boost for 'fuck it' or if it's dead neutral
+                        compound_score += 0.9 if 'fuck it' in text_lower else 0.8
+                        print(f"   [SENTIMENT] Adjusted sentiment due to motivational context: {sentiment['compound']} -> {compound_score}")
+
+            api_result['sentiment_score'] = compound_score
+            api_result['has_positive_context'] = has_positive_context
             
             # Determine if we should warn
-            # We warn IF it's toxic AND (sentiment is NOT positive OR it's a specific high-score violation like insult)
-            is_positive = sentiment['compound'] > 0.4
+            # Higher threshold for positivity if motivational
+            is_positive = compound_score > (0.2 if has_positive_context else 0.4)
             
             # If Sightengine flagged it as an insult strictly, we might still warn
             is_insult = api_result.get('categories', {}).get('insult', 0) > 0.7
             
             if api_result['is_toxic']:
-                # If it's a positive sentiment and NOT a direct insult, skip warning
+                # If it's a positive/motivational sentiment and NOT a direct insult, skip warning AND skip toxicity
                 if is_positive and not is_insult:
+                    api_result['is_toxic'] = False
                     api_result['should_warn'] = False
-                    print(f"   [SENTIMENT] Positive sentiment detected ({sentiment['compound']}), skipping warning.")
+                    print(f"   [SENTIMENT] Motivational/Positive context detected, allowing profanity.")
+                    return api_result
                 else:
                     api_result['should_warn'] = True
                 return api_result
@@ -78,12 +105,13 @@ class ToxicityDetector:
             # 2. Safety Fallback: Keyword check
             keyword_result = self.keyword_detector.detect(text)
             keyword_result['masked_text'] = api_result['masked_text']
-            keyword_result['sentiment_score'] = sentiment['compound']
+            keyword_result['sentiment_score'] = compound_score
             
             if keyword_result['is_toxic']:
                 if is_positive:
+                    keyword_result['is_toxic'] = False
                     keyword_result['should_warn'] = False
-                    print(f"   [SENTIMENT] Positive sentiment detected ({sentiment['compound']}), skipping warning (fallback).")
+                    print(f"   [SENTIMENT] Positive sentiment detected ({compound_score}), allowing message (fallback).")
                 else:
                     keyword_result['should_warn'] = True
                 return keyword_result
@@ -154,7 +182,16 @@ class KeywordDetector:
         self.compliment_keywords = [
             'gorgeous', 'beautiful', 'amazing', 'stunning', 'wonderful',
             'great', 'awesome', 'lovely', 'pretty', 'handsome', 'perfect',
-            'intelligent', 'smart', 'kind', 'friendly'
+            'intelligent', 'smart', 'kind', 'friendly', 'cool', 'strength',
+            'powerful', 'courage', 'growth', 'strength', 'tougher', 'proud'
+        ]
+
+        self.motivational_keywords = [
+            'guts', 'strength', 'smart', 'powerful', 'tougher', 'meaningful',
+            'courage', 'growth', 'proud', 'own it', 'keep going', 'forward',
+            'trust', 'believe', 'hard work', 'focus', 'keep at it', 'life',
+            'everything', 'tough', 'say no', 'explain your', 'figure it out',
+            'fuck it', 'say'
         ]
 
     def detect(self, text: str) -> Dict:
@@ -173,11 +210,26 @@ class KeywordDetector:
             chars = [re.escape(c) for c in word]
             return r"\b" + r"\W*".join(chars) + r"\b"
 
+        # Check for motivational context
+        found_motivational = any(word in text_lower for word in self.motivational_keywords)
+        found_compliment = any(word in text_lower for word in self.compliment_keywords)
+        has_positive_context = found_motivational or found_compliment
+
         for severity, keywords in self.toxic_keywords.items():
             for keyword in keywords:
                 pattern = make_fuzzy_pattern(keyword)
                 # Check against the cleaned text
                 if re.search(pattern, temp_text):
+                    # If it's a "medium" word like 'shit' or 'fuck' and we have positive context,
+                    # we demote it to 'low' or ignore it if it doesn't look like an attack
+                    is_soft_profanity = keyword in ['fuck', 'shit', 'fucking']
+                    
+                    if is_soft_profanity and has_positive_context:
+                        # Only demote if it's not a direct 'you are' attack
+                        if not re.search(r'\byou\s+.*' + keyword, text_lower):
+                            severity_scores['low'] += 1
+                            continue
+                    
                     detected_words.append(keyword)
                     severity_scores[severity] += 1
 
@@ -191,24 +243,34 @@ class KeywordDetector:
             severity_scores['medium'] * 0.6 +
             severity_scores['low'] * 0.2
         )
+        # If we have positive context, we are much more lenient on soft profanity
+        if has_positive_context and severity_scores['high'] == 0:
+            toxicity_score *= 0.5
+
         toxicity_score = min(toxicity_score / 1.5, 1.0)
         
-        is_toxic = toxicity_score >= 0.4 or severity_scores['high'] > 0
+        # Threshold for is_toxic: harder to reach if motivational
+        threshold = 0.4
+        if has_positive_context:
+            threshold = 0.6
+            
+        is_toxic = toxicity_score >= threshold or severity_scores['high'] > 0
 
-        log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Text: '{text_lower}' | is_toxic: {is_toxic} | score: {toxicity_score:.2f} | words: {detected_words}\n"
+        log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Text: '{text_lower}' | is_toxic: {is_toxic} | score: {toxicity_score:.2f} | words: {detected_words} | motivational: {has_positive_context}\n"
         try:
             with open('moderation_debug.log', 'a') as f:
                 f.write(log_entry)
         except:
             pass
         print(f"   [DETECTION] Text: '{text_lower}'")
-        print(f"   [DETECTION] is_toxic: {is_toxic}, score: {toxicity_score}, words: {detected_words}")
+        print(f"   [DETECTION] is_toxic: {is_toxic}, score: {toxicity_score}, words: {detected_words}, motivational: {has_positive_context}")
 
         return {
             'is_toxic': is_toxic,
             'toxicity_score': toxicity_score,
             'categories': severity_scores,
             'detected_words': detected_words,
+            'has_positive_context': has_positive_context,
             'method': 'keyword'
         }
 

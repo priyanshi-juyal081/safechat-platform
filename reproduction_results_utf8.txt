@@ -1,0 +1,13 @@
+Text                                                         | Toxic | Warn  | Score  | Sentiment 
+----------------------------------------------------------------------------------------------------
+This project turned out cool as f***.                        | False | False | 0.00 | 0.32
+You’ve got the guts to do scary shit, and that’s strength.   | False | False | 0.13 | -0.56
+Sometimes you just have to say “fuck it” and move forward.   | False | False | 1.00 | 0.00
+This is your life—own that shit.                             | False | False | 0.13 | -0.56
+Growth happens when you face uncomfortable shit.             | False | False | 0.27 | -0.56
+You figured it out—smart as fuck.                            | False | False | 1.00 | -0.54
+You’re doing meaningful shit, even if it’s hard.             | False | False | 0.13 | -0.40
+You’ve got the courage to say “no” to dumb shit.             | False | False | 0.33 | -0.57
+You trusted yourself, and that’s powerful as fuck.           | False | False | 1.00 | 0.34
+You don’t need to explain your shit to everyone.             | False | False | 0.27 | -0.56
+Life’s tough, but you’re tougher than that shit.             | False | False | 0.13 | -0.62
