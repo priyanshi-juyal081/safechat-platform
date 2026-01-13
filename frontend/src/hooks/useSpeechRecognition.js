@@ -151,19 +151,13 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
         console.log('📨 Speech moderation message:', data.type, data);
 
         if (data.type === 'speech_warning') {
-          console.log(`⚠️ WARNING ${data.warning_number}/3 received`);
+          console.log(`⚠️ WARNING ${data.warning_number}/3: ${data.message}`);
           setWarnings(data.warning_number);
-
-          // Show alert with warning details
-          alert(data.message || `Warning ${data.warning_number}/3: Your speech contains inappropriate content`);
-
         } else if (data.type === 'speech_timeout') {
           console.log(`🔇 TIMEOUT received: ${data.timeout_duration} seconds`);
           setWarnings(data.warning_number);
           setIsTimedOut(true);
           setTimeoutRemaining(data.timeout_duration);
-
-          alert(data.message || `You have been muted for ${data.timeout_duration} seconds`);
 
           // Start countdown
           startTimeoutCountdown(data.timeout_duration);
@@ -177,11 +171,9 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
               console.warn('Error stopping recognition:', e);
             }
           }
-
         } else if (data.type === 'stream_stopped') {
           console.log('🚫 STREAM STOPPED due to violations');
           setStreamStopped(true);
-          alert(data.message || 'Your stream has been terminated due to repeated violations');
 
           // Stop recognition immediately
           if (recognitionRef.current) {
@@ -304,10 +296,10 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
 
       // Auto-restart only if still streaming and not timed out
       const now = Date.now();
-      const RESTART_COOLDOWN = 800; // ms
+      const RESTART_COOLDOWN = 100; // Reduced for faster restart
       if (isStreamingRef.current && !isTimedOut && !streamStopped) {
         if (now - lastRestartRef.current < RESTART_COOLDOWN) {
-          console.log('⏱️ Restart cooldown active, skipping restart');
+          console.log('⏱️ Restart cooldown active');
           setIsListening(false);
           return;
         }

@@ -8,15 +8,14 @@ from django.utils import timezone
 from datetime import timedelta
 from chat.models import Stream
 from moderation.models import SpeechViolation, StreamTimeout
-from moderation.ai_detector import ToxicityDetector, KeywordDetector, APIDetector
+from moderation.ai_detector import ToxicityDetector, KeywordDetector
 from asgiref.sync import sync_to_async
 
 
 # Run the moderation call asynchronously
 async def run_moderation_async(text: str):
-    """Run moderation using the unified ToxicityDetector"""
-    method = os.getenv('MODERATION_METHOD', 'api')
-    detector = ToxicityDetector(method=method)
+    """Run moderation using the unified ToxicityDetector (consistent with chat)"""
+    detector = ToxicityDetector()
     return await detector.analyze_async(text)
 
 
@@ -70,7 +69,7 @@ class SpeechModerationConsumer(AsyncWebsocketConsumer):
                     }))
                     return
 
-                # Run moderation using OpenAI API (Async)
+                # Run moderation using unified detector (Async)
                 print(f"🔍 Running moderation on: '{transcript}'")
                 result = await run_moderation_async(transcript)
 

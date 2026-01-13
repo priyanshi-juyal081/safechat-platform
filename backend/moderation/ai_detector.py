@@ -57,42 +57,56 @@ class ToxicityDetector:
         found_compliment = any(word in text_lower for word in kw_detector.compliment_keywords)
         has_positive_context = found_motivational or found_compliment
 
-        # 1. API Check if enabled
+        # 1. FAST PATH: Keyword check first
+        keyword_result = self.keyword_detector.detect(text)
+        
+        # If the keyword detector is very confident it's toxic (high severity words)
+        # OR if it's very clearly clean (no words detected at all)
+        # and we don't have positive context that might override it, we can short-circuit
+        is_clearly_toxic = keyword_result['categories']['high'] > 0
+        is_clery_clean = not keyword_result['detected_words'] and not has_positive_context
+
+        # Add sentiment score (VADER is fast, run it anyway)
+        sentiment = sentiment_analyzer.polarity_scores(text)
+        compound_score = sentiment['compound']
+        
+        if has_positive_context:
+            if compound_score <= 0:
+                soft_profanity = ['fuck', 'shit', 'fucking', 'damn', 'fuck it']
+                if any(p in text_lower for p in soft_profanity):
+                    compound_score += 0.9 if 'fuck it' in text_lower else 0.8
+
+        keyword_result['sentiment_score'] = compound_score
+        keyword_result['has_positive_context'] = has_positive_context
+        keyword_result['masked_text'] = mask_text(text)
+
+        # Higher threshold for positivity if motivational
+        is_positive = compound_score > (0.2 if has_positive_context else 0.4)
+
+        if is_clearly_toxic and not is_positive:
+            print(f"   [FAST-PATH] Keyword detector high confidence (Toxic). Skipping API.")
+            keyword_result['should_warn'] = True
+            return keyword_result
+        
+        if is_clery_clean and not has_positive_context:
+            # print(f"   [FAST-PATH] Keyword detector high confidence (Clean). Skipping API.")
+            keyword_result['should_warn'] = False
+            return keyword_result
+
+        # 2. API Check fallback for nuanced cases
         if self.method == 'api':
+            print(f"   [Nuance] Nuanced case detected, calling {self.api_detector.__class__.__name__}...")
             api_result = await self.api_detector.detect_async(text)
             
-            # Add masking to result
-            api_result['masked_text'] = mask_text(text)
-            
-            # Add sentiment score
-            sentiment = sentiment_analyzer.polarity_scores(text)
-            compound_score = sentiment['compound']
-            
-            # Contextual Sentiment Adjustment:
-            # If we see motivational keywords, we "neutralize" the impact of soft profanity on VADER
-            if has_positive_context:
-                # If sentiment is negative but contain motivational words, it's likely just the profanity dragging it down
-                if compound_score <= 0: # Handle 0.0 case too
-                    # Search for soft profanity that might be dragging it down
-                    soft_profanity = ['fuck', 'shit', 'fucking', 'damn', 'fuck it']
-                    if any(p in text_lower for p in soft_profanity):
-                        # Boost it toward neutral or positive
-                        # Use a larger boost for 'fuck it' or if it's dead neutral
-                        compound_score += 0.9 if 'fuck it' in text_lower else 0.8
-                        print(f"   [SENTIMENT] Adjusted sentiment due to motivational context: {sentiment['compound']} -> {compound_score}")
-
+            api_result['masked_text'] = keyword_result['masked_text']
             api_result['sentiment_score'] = compound_score
             api_result['has_positive_context'] = has_positive_context
             
-            # Determine if we should warn
-            # Higher threshold for positivity if motivational
-            is_positive = compound_score > (0.2 if has_positive_context else 0.4)
-            
-            # If Sightengine flagged it as an insult strictly, we might still warn
+            # If Sightengine flagged it as an insult strictly
             is_insult = api_result.get('categories', {}).get('insult', 0) > 0.7
             
             if api_result['is_toxic']:
-                # If it's a positive/motivational sentiment and NOT a direct insult, skip warning AND skip toxicity
+                # If it's a positive/motivational sentiment and NOT a direct insult, allow it
                 if is_positive and not is_insult:
                     api_result['is_toxic'] = False
                     api_result['should_warn'] = False
@@ -102,16 +116,12 @@ class ToxicityDetector:
                     api_result['should_warn'] = True
                 return api_result
             
-            # 2. Safety Fallback: Keyword check
-            keyword_result = self.keyword_detector.detect(text)
-            keyword_result['masked_text'] = api_result['masked_text']
-            keyword_result['sentiment_score'] = compound_score
-            
+            # If API is clean but keywords caught something
             if keyword_result['is_toxic']:
                 if is_positive:
                     keyword_result['is_toxic'] = False
                     keyword_result['should_warn'] = False
-                    print(f"   [SENTIMENT] Positive sentiment detected ({compound_score}), allowing message (fallback).")
+                    print(f"   [SENTIMENT] Positive sentiment detected ({compound_score}), allowing message (keyword-fallback).")
                 else:
                     keyword_result['should_warn'] = True
                 return keyword_result
@@ -123,7 +133,7 @@ class ToxicityDetector:
         if self.method == 'transformer':
             return self.model_detector.detect(text)
         else:
-            return self.keyword_detector.detect(text)
+            return keyword_result
 
 
 # -------------------------------
@@ -436,164 +446,6 @@ class SightengineDetector:
 
 
 # -------------------------------
-
-class APIDetector:
-    """
-    Uses OpenAI Moderation API (Async & Sync)
-    """
-
-    def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            print("[!] OPENAI_API_KEY not set in environment!")
-        else:
-            print(f"[*] APIDetector initialized with key: {self.api_key[:8]}...")
-
-    def detect(self, text: str) -> Dict:
-        """Synchronous detection"""
-        if not self.api_key:
-            print("[!] OPENAI_API_KEY not set, falling back to keywords")
-            return KeywordDetector().detect(text)
-        return self._openai_moderation_sync(text)
-
-    async def detect_async(self, text: str) -> Dict:
-        """Asynchronous detection"""
-        if not self.api_key:
-            print("[!] OPENAI_API_KEY not set, falling back to keywords")
-            return KeywordDetector().detect(text)
-        return await self._openai_moderation_async(text)
-
-    def _process_results(self, result, text) -> Dict:
-        """Helper to process OpenAI results"""
-        # Convert category_scores to a regular dict
-        if hasattr(result.category_scores, '__dict__'):
-            scores = {k: v for k, v in result.category_scores.__dict__.items() if not k.startswith('_')}
-        elif hasattr(result.category_scores, 'model_dump'):
-            scores = result.category_scores.model_dump()
-        else:
-            scores = dict(result.category_scores)
-        
-        # Calculate max toxicity score
-        toxicity_score = max(scores.values()) if scores else 0.0
-        
-        # ALWAYS print scores for debugging
-        print(f"\n   [API DEBUG] Text: '{text}'")
-        print(f"   [API DEBUG] Scores: {scores}")
-        print(f"   [API DEBUG] Max Score: {toxicity_score:.4f}, Flagged by OpenAI: {result.flagged}")
-        
-        # Initial flagging decision
-        is_toxic = result.flagged or any(score > 0.7 for score in scores.values())
-        
-        # Override for whitelisted phrases
-        if is_toxic:
-            keyword_detector = KeywordDetector()
-            text_lower = text.lower().strip()
-            for phrase in keyword_detector.allowed_phrases:
-                clean_text = re.sub(r'[^\w\s]', '', text_lower)
-                clean_phrase = re.sub(r'[^\w\s]', '', phrase)
-                if clean_text == clean_phrase or (phrase in text_lower and len(text_lower) < len(phrase) + 5):
-                    print(f"   [-] Overriding OpenAI flag for whitelisted phrase: '{phrase}'")
-                    is_toxic = False
-                    break
-            
-            # Additional override for compliments
-            if is_toxic:
-                for compliment in KeywordDetector().compliment_keywords:
-                    if compliment in text_lower:
-                        # Only override if it's not a severe violation (e.g. not hate speech score > 0.9)
-                        if toxicity_score < 0.85:
-                            print(f"   [-] Overriding OpenAI flag for compliment: '{compliment}'")
-                            is_toxic = False
-                            break
-
-        if is_toxic:
-            print(f"\n[!] TOXICITY DETECTED")
-            print(f"    Method: OpenAI API")
-            print(f"    Max Score: {toxicity_score:.4f}")
-            print(f"    Categories: {[cat for cat, score in scores.items() if score > 0.5]}")
-            return {
-                'is_toxic': True,
-                'toxicity_score': toxicity_score,
-                'categories': scores,
-                'detected_words': [cat for cat, score in scores.items() if score > 0.5],
-                'method': 'openai_moderation'
-            }
-
-        return {
-            'is_toxic': False,
-            'toxicity_score': toxicity_score,
-            'categories': scores,
-            'detected_words': [],
-            'method': 'openai_moderation'
-        }
-
-    def _openai_moderation_sync(self, text: str) -> Dict:
-        max_attempts = 3
-        backoff = 1
-
-        for attempt in range(1, max_attempts + 1):
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=self.api_key)
-
-                print(f"\n[?] Calling OpenAI Moderation API (SYNC) (attempt {attempt}/{max_attempts})")
-                print(f"   Text: '{text}'")
-
-                response = client.moderations.create(
-                    model="text-moderation-latest",
-                    input=text
-                )
-                result = response.results[0]
-                return self._process_results(result, text)
-
-            except Exception as e:
-                msg = str(e)
-                print(f"   [X] OpenAI moderation error (attempt {attempt}/{max_attempts}):")
-                print(f"       {msg}")
-                
-                if attempt < max_attempts and ("too many requests" in msg.lower() or "429" in msg):
-                    print(f"   [!] Rate limited or quota exceeded, waiting {backoff} seconds...")
-                    time.sleep(backoff)
-                    backoff *= 2
-                    continue
-                
-                print(f"   [!] Falling back to keyword detector due to persistent error")
-                return KeywordDetector().detect(text)
-
-    async def _openai_moderation_async(self, text: str) -> Dict:
-        max_attempts = 3
-        backoff = 1
-
-        for attempt in range(1, max_attempts + 1):
-            try:
-                from openai import AsyncOpenAI
-                client = AsyncOpenAI(api_key=self.api_key)
-
-                print(f"\n[?] Calling OpenAI Moderation API (ASYNC) (attempt {attempt}/{max_attempts})")
-                # print(f"   Text: '{text}'")
-
-                response = await client.moderations.create(
-                    model="text-moderation-latest",
-                    input=text
-                )
-                result = response.results[0]
-                return self._process_results(result, text)
-
-            except Exception as e:
-                msg = str(e)
-                print(f"   [X] OpenAI Async moderation error (attempt {attempt}/{max_attempts}):")
-                print(f"       {msg}")
-                
-                # If rate limited, retry
-                if attempt < max_attempts and ("too many requests" in msg.lower() or "429" in msg):
-                    print(f"   [!] Rate limited or quota exceeded, waiting {backoff} seconds...")
-                    await asyncio.sleep(backoff)
-                    backoff *= 2
-                    continue
-                
-                print(f"   [!] Falling back to keyword detector due to persistent error")
-                return KeywordDetector().detect(text)
-
 
 # -------------------------------
 # Extra Quality Checks
