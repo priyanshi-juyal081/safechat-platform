@@ -17,11 +17,22 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
   const lastRestartRef = useRef(0);
   const resumeOnWsOpenRef = useRef(false);
   const isStreamingRef = useRef(isStreaming);
+  const isTimedOutRef = useRef(isTimedOut);
+  const streamStoppedRef = useRef(streamStopped);
+  const isStartingRef = useRef(false);
 
-  // Keep track of isStreaming in a ref so we can access it in cleanup
+  // Keep track of values in refs to avoid stale closures in event handlers
   useEffect(() => {
     isStreamingRef.current = isStreaming;
   }, [isStreaming]);
+
+  useEffect(() => {
+    isTimedOutRef.current = isTimedOut;
+  }, [isTimedOut]);
+
+  useEffect(() => {
+    streamStoppedRef.current = streamStopped;
+  }, [streamStopped]);
 
   // Throttle function to prevent sending too many requests
   const throttledSend = useCallback((ws, transcript) => {
@@ -73,13 +84,19 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
         setTimeoutRemaining(0);
         console.log('✅ Timeout ended, resuming speech recognition');
 
-        // Resume speech recognition only if still streaming
-        if (recognitionRef.current && isStreamingRef.current) {
+        // Resume speech recognition only if still streaming and not stopped
+        if (recognitionRef.current && isStreamingRef.current && !streamStoppedRef.current) {
           try {
-            recognitionRef.current.start();
-            setIsListening(true);
+            if (!isStartingRef.current && !isListening) {
+              isStartingRef.current = true;
+              recognitionRef.current.start();
+              setIsListening(true);
+              console.log('🎙️ Recognition resumed after timeout');
+            }
           } catch (e) {
             console.warn('Could not restart recognition:', e);
+          } finally {
+            isStartingRef.current = false;
           }
         }
       }
@@ -134,14 +151,20 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
       ws.onopen = () => {
         console.log('✅ Speech moderation WebSocket connected');
         // If we were waiting to resume recognition until WS opened, do that now
-        if (resumeOnWsOpenRef.current && recognitionRef.current && isStreamingRef.current && !isTimedOut && !streamStopped) {
+        if (resumeOnWsOpenRef.current && recognitionRef.current &&
+          isStreamingRef.current && !isTimedOutRef.current && !streamStoppedRef.current) {
           try {
-            recognitionRef.current.start();
-            setIsListening(true);
+            if (!isListening && !isStartingRef.current) {
+              isStartingRef.current = true;
+              recognitionRef.current.start();
+              setIsListening(true);
+            }
             resumeOnWsOpenRef.current = false;
             console.log('✅ Resumed recognition after WS open');
           } catch (e) {
             console.warn('Could not resume recognition on WS open:', e);
+          } finally {
+            isStartingRef.current = false;
           }
         }
       };
@@ -197,6 +220,11 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
 
         } else if (data.type === 'timeout_active') {
           console.log('⏸️ User is timed out, cannot speak');
+          setIsTimedOut(true);
+          if (data.timeout_remaining) {
+            setTimeoutRemaining(data.timeout_remaining);
+            startTimeoutCountdown(data.timeout_remaining);
+          }
         } else if (data.type === 'timeout_expired') {
           console.log('✅ Timeout expired notification:', data);
           // If this expiry is for this user+stream, clear timeout UI and resume recognition
@@ -271,79 +299,93 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
     };
 
     recognition.onerror = (event) => {
+      if (event.error === 'aborted') {
+        console.log('⚠️ Recognition aborted (intentional or overlapping start)');
+        return;
+      }
+
       console.error('❌ Speech recognition error:', event.error);
 
       if (event.error === 'no-speech') {
-        // Silently restart for no-speech errors
-        console.log('🔄 No speech detected, restarting...');
-        if (isStreamingRef.current && !isTimedOut && !streamStopped) {
-          try {
-            recognition.start();
-          } catch (e) {
-            // Ignore if already started
-          }
-        }
-      } else if (event.error === 'aborted') {
-        // Ignore aborted errors
-        console.log('⚠️ Recognition aborted');
-      } else {
-        console.error('Speech recognition error:', event.error);
+        // Handle no-speech silently, but don't restart immediately (wait for onend)
+        console.log('🔄 No speech detected');
       }
     };
 
     recognition.onend = () => {
       console.log('🎙️ Recognition ended');
+      setIsListening(false);
+      isStartingRef.current = false;
 
-      // Auto-restart only if still streaming and not timed out
+      // Auto-restart only if still streaming, not timed out, and not stopped
       const now = Date.now();
-      const RESTART_COOLDOWN = 100; // Reduced for faster restart
-      if (isStreamingRef.current && !isTimedOut && !streamStopped) {
+      const RESTART_COOLDOWN = 500; // Increased to be safer
+
+      if (isStreamingRef.current && !isTimedOutRef.current && !streamStoppedRef.current) {
         if (now - lastRestartRef.current < RESTART_COOLDOWN) {
-          console.log('⏱️ Restart cooldown active');
-          setIsListening(false);
+          console.log('⏱️ Restart cooldown active, waiting...');
+          setTimeout(() => {
+            if (isStreamingRef.current && !isTimedOutRef.current && !streamStoppedRef.current && !isListening) {
+              try {
+                if (!isStartingRef.current) {
+                  isStartingRef.current = true;
+                  recognition.start();
+                  lastRestartRef.current = Date.now();
+                }
+              } catch (e) {
+                console.warn('Delayed restart failed:', e);
+                isStartingRef.current = false;
+              }
+            }
+          }, RESTART_COOLDOWN);
           return;
         }
 
         lastRestartRef.current = now;
         console.log('🔄 Restarting recognition...');
-        // small delay to avoid immediate start/stop race conditions
+
+        // Use a small buffer to ensure the instance is fully ended
         setTimeout(() => {
-          if (isStreamingRef.current && !isTimedOut && !streamStopped) {
-            // Only start if WS is open to avoid lost transcripts
+          if (isStreamingRef.current && !isTimedOutRef.current && !streamStoppedRef.current) {
             if (speechWsRef.current && speechWsRef.current.readyState === WebSocket.OPEN) {
               try {
-                recognition.start();
-                console.log('🎙️ Recognition restarted');
+                if (!isStartingRef.current) {
+                  isStartingRef.current = true;
+                  recognition.start();
+                  console.log('🎙️ Recognition restarted');
+                }
               } catch (e) {
                 console.warn('Could not restart recognition:', e);
+                isStartingRef.current = false;
               }
             } else {
-              // Wait for WS to open then resume
               resumeOnWsOpenRef.current = true;
               console.log('⏳ Delaying recognition restart until WS opens');
             }
           }
-        }, 200);
-      } else {
-        console.log('❌ Not restarting recognition (streaming ended or timed out)');
-        setIsListening(false);
+        }, 100);
       }
     };
 
     recognition.onstart = () => {
       console.log('🎙️ Recognition started');
       setIsListening(true);
+      isStartingRef.current = false;
     };
 
     recognitionRef.current = recognition;
     connectSpeechWebSocket();
 
-    // Start recognition
-    try {
-      recognition.start();
-      console.log('✅ Speech recognition initialized and started');
-    } catch (e) {
-      console.warn('Could not start recognition:', e);
+    // Start recognition if not timed out
+    if (!isTimedOutRef.current && !streamStoppedRef.current) {
+      try {
+        isStartingRef.current = true;
+        recognition.start();
+        console.log('✅ Speech recognition initialized and started');
+      } catch (e) {
+        console.warn('Could not start recognition:', e);
+        isStartingRef.current = false;
+      }
     }
 
     // Cleanup function
@@ -371,7 +413,7 @@ export const useSpeechRecognition = (streamId, userId, isStreaming) => {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [streamId, userId, isStreaming, isTimedOut, streamStopped, throttledSend, startTimeoutCountdown]);
+  }, [streamId, userId, isStreaming, throttledSend, startTimeoutCountdown]);
 
   return {
     isListening,
